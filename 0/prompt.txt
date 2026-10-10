@@ -1,0 +1,14 @@
+You are building SignalSDR for the neatHack hackathon.
+Read every file in docs/ in order: 00_START_HERE.md through 08_CRUSTDATA_API.md.
+Treat 01, 05 and 08 as hard rules. Treat 02 and 03 as the design.
+
+Do NOT write code yet. Reply with:
+1. A 5-line summary of what we are building and the agent flow.
+2. The hard rules you will follow (neatlogs tracing, Entire checkpoints, caching/replay, no real sends, Crustdata rules).
+3. Any contradictions or gaps you found between the docs.
+4. Questions you need answered before Phase 1.
+
+Decisions already made:
+- LLM: AWS Bedrock via langchain-aws ChatBedrockConverse, using AWS_PROFILE + AWS_REGION from env (no keys in code). Model IDs come from env: LLM_MODEL_STRONG and LLM_MODEL_FAST.
+- Python 3.11+, LangGraph, SQLite, FastAPI, typer, Mailpit for email.
+- DATA_MODE=replay and DEMO_MODE=true by default.
