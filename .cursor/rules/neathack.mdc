@@ -1,0 +1,10 @@
+---
+description: neatHack hard rules for SignalSDR
+alwaysApply: true
+---
+Follow 01_HACKATHON_RULES.md and 05_RELIABILITY_SECURITY.md as hard rules.
+Follow 02_ARCHITECTURE.md and 03_AGENTS_SPEC.md for design.
+For every Crustdata call, follow 08_CRUSTDATA_API.md exactly (paths, headers, field names, error handling). Never guess an endpoint or field.
+The files 00_START_HERE.md through 08_CRUSTDATA_API.md stay at the repo root. Never commit or push them.
+Never put API keys, .env contents, prospect personal data, or tokens in code, commits, logs, traces, or hackathon.md.
+Commits and pushes use the GitHub account DevGajjar28. Do not attribute commits to Cursor.

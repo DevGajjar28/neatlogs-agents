@@ -1,0 +1,37 @@
+# SignalSDR
+
+Outbound agent for neatHack 2026. It researches a seller, finds lookalike buyers, and drafts email that can be sent only when each factual claim has a source. Demo mode never delivers to a real prospect.
+
+## Setup
+
+Python 3.11 or newer.
+
+```bash
+py -3.11 -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[dev]"
+copy .env.example .env
+```
+
+Fill `.env` locally. `AWS_PROFILE` and `AWS_REGION` select the Bedrock profile. `LLM_MODEL_STRONG` and `LLM_MODEL_FAST` are Bedrock model IDs. No access keys belong in code or in git.
+
+```bash
+python cli.py --help
+pytest
+```
+
+After `.env` is filled, `python cli.py ping-llm` sends one short Bedrock call through neatlogs.
+
+`DATA_MODE=replay` and `DEMO_MODE=true` are the defaults. Replay does not call Crustdata. Demo mode will only hand mail to a local SMTP catcher on `SMTP_HOST` / `SMTP_PORT` (default `localhost:1025`). Docker is not required.
+
+## Commands
+
+`run`, `resume`, `approve`, `report`, `simulate-reply`, and `purge` are reserved. The campaign graph is not built yet.
+
+## Team
+
+DevGajjar28
+
+## Limitations
+
+This is a hackathon build. It is not legal advice on outreach. Rules such as GDPR and India's DPDP Act vary by region. Nothing is sent until a verifier and a person approve it, and demo sends stay on the local catcher.

@@ -1,0 +1,25 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+*.db
+cache/
+reports/raw/
+config/crustdata_account.json
+
+# Local build spec. Stays on disk. Never commit or push.
+/00_START_HERE.md
+/01_HACKATHON_RULES.md
+/02_ARCHITECTURE.md
+/03_AGENTS_SPEC.md
+/04_TOOLING_SETUP.md
+/05_RELIABILITY_SECURITY.md
+/06_BUILD_PLAN.md
+/07_EVIDENCE_AND_SUBMISSION.md
+/08_CRUSTDATA_API.md
