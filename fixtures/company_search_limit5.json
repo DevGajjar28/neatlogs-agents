@@ -1,0 +1,61 @@
+{
+  "companies": [
+    {
+      "crustdata_company_id": 53,
+      "basic_info": {
+        "name": "ACCLAIM INDUSTRIES",
+        "primary_domain": "acclaimacclaim.com",
+        "employee_count_range": "2-10"
+      },
+      "locations": {
+        "country": "USA"
+      }
+    },
+    {
+      "crustdata_company_id": 133,
+      "basic_info": {
+        "name": "Agro Chem",
+        "primary_domain": "agrochem.com",
+        "employee_count_range": ""
+      },
+      "locations": {
+        "country": "USA"
+      }
+    },
+    {
+      "crustdata_company_id": 197,
+      "basic_info": {
+        "name": "Allsec Technologies Limited",
+        "primary_domain": "alldigitech.com",
+        "employee_count_range": "myself only"
+      },
+      "locations": {
+        "country": "USA"
+      }
+    },
+    {
+      "crustdata_company_id": 202,
+      "basic_info": {
+        "name": "Alpha Drugs",
+        "primary_domain": "",
+        "employee_count_range": "2-10"
+      },
+      "locations": {
+        "country": "USA"
+      }
+    },
+    {
+      "crustdata_company_id": 209,
+      "basic_info": {
+        "name": "Alpine Industries Inc.",
+        "primary_domain": "alpineindustries.com",
+        "employee_count_range": "51-200"
+      },
+      "locations": {
+        "country": "USA"
+      }
+    }
+  ],
+  "next_cursor": "H4sIABNBymoC_xWMMQ6DMAwAv4IydyAhdux-paqQ4xgxVI0KYagQf2-63d1wp_sctn3nVfbV3QfnacFMWtBMcApksSQWSNJDjOQXw1KQMqpOhqys4qEDA2dNQO42uL1urb8eYeRn11abvGatx_tfKcDo2V8_OfEEqXkAAAA=",
+  "total_count": 8250191
+}

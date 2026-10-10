@@ -24,11 +24,18 @@ LangGraph, AWS Bedrock (ChatBedrockConverse), neatlogs, Entire, cfo.ai, Crustdat
 - Failures remaining: Entire CLI still not installed (no checkpoint on this change). Agent graph and Crustdata client not started.
 - Evidence: llm-smoke trace under workflow `llm-smoke` in neatlogs (link after dashboard check).
 
+### 2026-10-10 19:15 IST
+- Completed: Phase 2 Crustdata client with SQLite cache, budget ledger, chaos hooks, typed errors (402/403/403-fields/429), LangChain `@tool` wrappers, and `doctor-crustdata`. Account snapshot written to gitignored `config/crustdata_account.json`. One live `company/search` limit=5 cost 0.15 credits; identical repeat was a cache hit (ledger stayed 0.15). Fixture: `fixtures/company_search_limit5.json`. Fallbacks noted: live people search disabled, `/person/contact/enrich` disabled, `contact.business_emails` available on `/person/enrich`. Balance 200 credits.
+- Planned: Phase 3 v0 linear pipeline (Gate 1).
+- Tests run: `pytest` — 8 passed (cache hit, 429 retry, 402 no-retry, 403 fields retry, budget refusal, replay miss). `doctor-crustdata` and `--sample-search` (DATA_MODE=live for that command only).
+- Failures remaining: Entire CLI still missing. Agent graph not started. Keep `DATA_MODE=replay` by default.
+- Evidence: neatlogs workflow `doctor-crustdata`; fixture on disk; ledger credits 0.15 then cache hit.
+
 ## Demo
 Not available yet.
 
 ## Known limitations and next steps
-Agent graph, verifier, and sender are not implemented. Demo mail will use a local SMTP catcher, not Docker. Crustdata client is Phase 2.
+Agent graph, verifier, and sender are not implemented. Demo mail will use a local SMTP catcher, not Docker. Default `DATA_MODE=replay`. Live people search and dedicated contact enrich are disabled on this Crustdata plan.
 
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
