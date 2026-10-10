@@ -72,6 +72,13 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: human gate 2 / Mailpit send not built yet.
 - Evidence: unit events `verify.reject`, `verify.redraft`, `verify.pass`; injection quarantine unit coverage.
 
+### 2026-10-10 20:55 IST
+- Completed: Phase 7 sender path. `mailer.send` enforces Mailpit-only in demo, suppression, daily/domain caps, idempotency, guessed-email flag. Human gate 2 `approval_gate` interrupt + UI `/emails` + CLI approve. Sender sends step 1 and schedules 2–3; `worker` polls SQLite jobs, cancels on `simulate-reply`.
+- Planned: Phase 8 v1 comparison + reporter + cfo.ai.
+- Tests run: `pytest tests/test_mailer_worker.py` (+ suite) — 24 passed with mocked SMTP; **0 live Crustdata**.
+- Failures remaining: real Mailpit demo still needs local catcher running for a live send smoke.
+- Evidence: unit coverage for idempotent skip, suppression, guessed deny, follow-up send + reply cancel.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

@@ -121,6 +121,15 @@ def run(
             typer.echo(f"Approve: python cli.py approve {cid} --yes")
             typer.echo(f"Or UI:   python -m app.ui.app -> http://127.0.0.1:8080/campaigns/{cid}/icp")
             return
+        if payload and payload.get("type") == "email_approval":
+            items = payload.get("items") or []
+            typer.echo(f"campaign_id={cid}")
+            typer.echo("status=awaiting_email_approval")
+            typer.echo(f"drafts={len(items)}")
+            typer.echo(f"Approve: python cli.py approve {cid} --yes")
+            typer.echo(f"Or UI:   http://127.0.0.1:8080/campaigns/{cid}/emails")
+            persist_v0_run(result)
+            return
 
         persist_v0_run(result)
         report_path = write_v0_report(result, wall_seconds=time.time() - started)
@@ -176,7 +185,7 @@ def approve(
     campaign_id: str = typer.Argument(..., help="Campaign waiting for approval"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Approve without interactive prompt"),
 ) -> None:
-    """Approve an ICP (human gate 1) and resume with Command(resume=...)."""
+    """Approve ICP (gate 1) or email drafts (gate 2) and resume with Command(resume=...)."""
     import time
     from pathlib import Path
 
@@ -200,35 +209,68 @@ def approve(
         config = _run_config(campaign_id)
         snap = app_graph.get_state(config)
         payload = _interrupt_from_state(snap)
-        if not payload or payload.get("type") != "icp_approval":
-            typer.echo("No ICP approval interrupt found for this campaign", err=True)
+        if not payload:
+            typer.echo("No approval interrupt found for this campaign", err=True)
             raise typer.Exit(code=1)
-        icp = dict(payload.get("icp") or {})
-        typer.echo(f"industries={icp.get('industries')}")
-        typer.echo(f"countries={icp.get('countries')}")
-        typer.echo(f"employee_count_ranges={icp.get('employee_count_ranges')}")
-        typer.echo(f"roles={[(r.get('kind'), r.get('title_variants')) for r in (icp.get('roles') or [])]}")
-        if not yes:
-            answer = typer.prompt("Approve ICP? [y/N]", default="y")
-            if str(answer).strip().lower() not in {"y", "yes"}:
-                result = app_graph.invoke(
-                    Command(resume={"approved": False}),
-                    config=config,
+
+        if payload.get("type") == "icp_approval":
+            icp = dict(payload.get("icp") or {})
+            typer.echo(f"industries={icp.get('industries')}")
+            typer.echo(f"countries={icp.get('countries')}")
+            typer.echo(f"employee_count_ranges={icp.get('employee_count_ranges')}")
+            if not yes:
+                answer = typer.prompt("Approve ICP? [y/N]", default="y")
+                if str(answer).strip().lower() not in {"y", "yes"}:
+                    result = app_graph.invoke(
+                        Command(resume={"approved": False}),
+                        config=config,
+                    )
+                    typer.echo("ICP rejected; campaign halted")
+                    typer.echo(f"halt_reason={result.get('halt_reason')}")
+                    return
+            result = app_graph.invoke(
+                Command(resume={"approved": True, "icp": icp}),
+                config=config,
+            )
+        elif payload.get("type") == "email_approval":
+            items = payload.get("items") or []
+            typer.echo(f"drafts_waiting={len(items)}")
+            for item in items:
+                typer.echo(
+                    f"- {item.get('name')} <{item.get('email')}> "
+                    f"conf={item.get('email_confidence')} "
+                    f"subject={(item.get('draft') or {}).get('subject')}"
                 )
-                typer.echo("ICP rejected; campaign halted")
-                typer.echo(f"halt_reason={result.get('halt_reason')}")
-                return
-        result = app_graph.invoke(
-            Command(resume={"approved": True, "icp": icp}),
-            config=config,
-        )
+            if not yes:
+                answer = typer.prompt("Approve all drafts? [y/N]", default="y")
+                if str(answer).strip().lower() not in {"y", "yes"}:
+                    result = app_graph.invoke(
+                        Command(resume={"approve_all": False, "approvals": {}}),
+                        config=config,
+                    )
+                    persist_v0_run(result)
+                    typer.echo("All drafts rejected")
+                    return
+            result = app_graph.invoke(
+                Command(resume={"approve_all": True, "actor": "cli"}),
+                config=config,
+            )
+        else:
+            typer.echo(f"Unknown interrupt type: {payload.get('type')}", err=True)
+            raise typer.Exit(code=1)
+
         payload2 = _interrupt_from_result(result)
-        if payload2 and payload2.get("type") == "icp_approval":
-            typer.echo("Still awaiting ICP approval (unexpected)")
+        if payload2 and payload2.get("type") in {"icp_approval", "email_approval"}:
+            typer.echo(f"Still awaiting approval: {payload2.get('type')}")
+            persist_v0_run(result)
             return
         persist_v0_run(result)
         report_path = write_v0_report(result, wall_seconds=time.time() - started)
         _print_run_summary(campaign_id, result, report_path, Path(settings.db_path))
+        sent = [e for e in (result.get("events") or []) if e.get("type") == "send.step1"]
+        scheduled = [e for e in (result.get("events") or []) if e.get("type") == "send.scheduled"]
+        typer.echo(f"sent_step1={len(sent)} scheduled_followups={len(scheduled)}")
+        typer.echo("Run worker: python cli.py worker --once")
     finally:
         conn.close()
         finish()
@@ -236,7 +278,7 @@ def approve(
 
 @app.command("serve-ui")
 def serve_ui(port: int = typer.Option(8080, help="Local port")) -> None:
-    """Serve the minimal ICP approval UI."""
+    """Serve ICP + email approval UI."""
     import uvicorn
 
     uvicorn.run("app.ui.app:app", host="127.0.0.1", port=port, reload=False)
@@ -250,17 +292,63 @@ def report(campaign_id: str = typer.Argument(..., help="Campaign to report")) ->
 
 
 @app.command("simulate-reply")
-def simulate_reply(lead_id: str = typer.Argument(..., help="Lead that replied")) -> None:
+def simulate_reply_cmd(
+    lead_id: str = typer.Argument(..., help="Lead that replied"),
+    opt_out: bool = typer.Option(False, "--opt-out", help="Record as opt-out instead of reply"),
+) -> None:
     """Insert a demo reply so follow-ups stop."""
-    _ = lead_id
-    _pending("simulate-reply")
+    from app.scheduler.worker import simulate_reply
+
+    simulate_reply(lead_id, kind="opt_out" if opt_out else "reply")
+    typer.echo(f"recorded={'opt_out' if opt_out else 'reply'} lead_id={lead_id}")
+
+
+@app.command()
+def worker(
+    once: bool = typer.Option(False, "--once", help="Process due jobs once and exit"),
+    poll: float = typer.Option(20.0, help="Seconds between polls"),
+) -> None:
+    """Process scheduled follow-ups (survives restart via SQLite)."""
+    from app.scheduler.worker import process_due_jobs, run_forever
+
+    if once:
+        results = process_due_jobs()
+        typer.echo(f"processed={len(results)}")
+        for row in results:
+            typer.echo(str(row))
+        return
+    typer.echo(f"worker polling every {poll}s (Ctrl+C to stop)")
+    run_forever(poll_seconds=poll)
 
 
 @app.command()
 def purge(campaign_id: str = typer.Argument(..., help="Campaign data to delete")) -> None:
     """Delete cache, leads, drafts, and schedule rows for one campaign."""
-    _ = campaign_id
-    _pending("purge")
+    from app.config import get_settings
+    from app.infra.db import connect, init_db
+
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    try:
+        lead_ids = [
+            r["id"]
+            for r in conn.execute(
+                "SELECT id FROM leads WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchall()
+        ]
+        for lead_id in lead_ids:
+            conn.execute("DELETE FROM scheduled_jobs WHERE lead_id = ?", (lead_id,))
+            conn.execute("DELETE FROM emails WHERE lead_id = ?", (lead_id,))
+            conn.execute("DELETE FROM replies WHERE lead_id = ?", (lead_id,))
+        conn.execute("DELETE FROM leads WHERE campaign_id = ?", (campaign_id,))
+        conn.execute("DELETE FROM budget_ledger WHERE campaign_id = ?", (campaign_id,))
+        conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
+        conn.commit()
+        typer.echo(f"purged campaign_id={campaign_id} leads={len(lead_ids)}")
+    finally:
+        conn.close()
 
 
 @app.command("doctor-crustdata")

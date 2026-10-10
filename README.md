@@ -28,12 +28,14 @@ After `.env` is filled, `python cli.py ping-llm` sends one short Bedrock call th
 
 ```bash
 python cli.py run --n 10
-python cli.py approve <campaign_id> --yes
-python cli.py serve-ui
-python cli.py run --narrow-icp   # force planner replan.widen_icp
+python cli.py approve <campaign_id> --yes          # ICP gate, then later email gate
+python cli.py serve-ui                             # /icp and /emails
+python cli.py worker --once                        # due follow-ups
+python cli.py simulate-reply <lead_id>             # stop follow-ups
+python cli.py run --narrow-icp                     # force replan.widen_icp
 ```
 
-`run` stops at the ICP human gate; `approve` resumes. UI: `http://127.0.0.1:8080/campaigns/<id>/icp`.
+`run` stops at ICP, then again at email approval. Demo sends go to Mailpit (`localhost:1025`) as `<lead_id>@sandbox.local`.
 
 ## Team
 

@@ -47,7 +47,8 @@ def _interrupt_payload(snapshot) -> dict[str, Any] | None:
 def home() -> str:
     return (
         "<html><body><h1>SignalSDR</h1>"
-        "<p>Open <code>/campaigns/&lt;campaign_id&gt;/icp</code> for ICP approval.</p>"
+        "<p>ICP gate: <code>/campaigns/&lt;id&gt;/icp</code></p>"
+        "<p>Email gate: <code>/campaigns/&lt;id&gt;/emails</code></p>"
         "</body></html>"
     )
 
@@ -108,6 +109,92 @@ def icp_approve(
             config=config,
         )
         return RedirectResponse(url=f"/campaigns/{campaign_id}/icp?done=1", status_code=303)
+    finally:
+        conn.close()
+        finish()
+
+
+@app.get("/campaigns/{campaign_id}/emails", response_class=HTMLResponse)
+def emails_page(request: Request, campaign_id: str) -> HTMLResponse:
+    conn, checkpointer = open_checkpointer()
+    try:
+        graph = build_graph(checkpointer)
+        snap = graph.get_state(_thread_config(campaign_id))
+        payload = _interrupt_payload(snap) or {}
+        items = payload.get("items") if payload.get("type") == "email_approval" else []
+        if not items and not request.query_params.get("done"):
+            # Fall back to state drafts for inspection after resume.
+            values = snap.values or {}
+            drafts = values.get("drafts") or {}
+            contacts = {c["id"]: c for c in (values.get("contacts") or []) if isinstance(c, dict)}
+            verifier = values.get("verifier") or {}
+            items = []
+            for cid, seq in drafts.items():
+                contact = contacts.get(cid) or {}
+                items.append(
+                    {
+                        "contact_id": cid,
+                        "name": contact.get("name"),
+                        "title": contact.get("title"),
+                        "email": contact.get("email"),
+                        "email_confidence": contact.get("email_confidence"),
+                        "draft": (seq or [None])[0] or {},
+                        "cited_evidence_ids": ((seq or [{}])[0] or {}).get("cited_evidence_ids") or [],
+                        "verifier": verifier.get(cid) or {},
+                    }
+                )
+        return _TEMPLATES.TemplateResponse(
+            "emails.html",
+            {
+                "request": request,
+                "campaign_id": campaign_id,
+                "items": items,
+                "waiting": payload.get("type") == "email_approval",
+            },
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/campaigns/{campaign_id}/emails/approve")
+def emails_approve(
+    campaign_id: str,
+    allow_guessed: str = Form(""),
+) -> RedirectResponse:
+    from app.infra.audit import write_audit
+
+    conn, checkpointer = open_checkpointer()
+    init_tracing("outbound-email-approve-ui")
+    try:
+        graph = build_graph(checkpointer)
+        config = _thread_config(campaign_id)
+        snap = graph.get_state(config)
+        payload = _interrupt_payload(snap)
+        if not payload or payload.get("type") != "email_approval":
+            raise HTTPException(status_code=409, detail="Campaign is not waiting on email approval")
+        write_audit(
+            actor="ui",
+            action="approve",
+            target=campaign_id,
+            details={"gate": "email", "allow_guessed": bool(allow_guessed)},
+        )
+        graph.invoke(
+            Command(
+                resume={
+                    "approve_all": True,
+                    "actor": "ui",
+                    "approvals": {
+                        item["contact_id"]: {
+                            "approved": True,
+                            "allow_guessed": bool(allow_guessed),
+                        }
+                        for item in (payload.get("items") or [])
+                    },
+                }
+            ),
+            config=config,
+        )
+        return RedirectResponse(url=f"/campaigns/{campaign_id}/emails?done=1", status_code=303)
     finally:
         conn.close()
         finish()

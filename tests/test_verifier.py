@@ -166,7 +166,7 @@ def test_reject_redraft_pass_loop(monkeypatch):
     g.add_conditional_edges(
         "verifier",
         route_after_verifier,
-        {"email_writer": "email_writer", "planner": "planner"},
+        {"email_writer": "email_writer", "approval_gate": "planner"},
     )
     g.add_edge("planner", END)
     app = g.compile(checkpointer=MemorySaver())

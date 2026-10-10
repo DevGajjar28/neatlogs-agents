@@ -1,6 +1,6 @@
 """LangGraph StateGraph builder for SignalSDR.
 
-Phase 6: writer → verifier with redraft loop; account Send fan-out; ICP gate.
+Phase 7: approval gate + sender after verifier; account Send fan-out; ICP gate.
 """
 
 from __future__ import annotations
@@ -17,10 +17,12 @@ from app.agents.account_researcher import (
     account_join_node,
     fanout_account_companies,
 )
+from app.agents.approval_gate import approval_gate_node
 from app.agents.buyer_finder import buyer_propose_icp_node, buyer_search_node, icp_gate_node
 from app.agents.email_writer import email_writer_node
 from app.agents.planner import planner_node, route_after_planner
 from app.agents.product_researcher import product_researcher_node
+from app.agents.sender import sender_node
 from app.agents.verifier import route_after_verifier, verifier_node
 from app.config import get_settings
 from app.state import CampaignState
@@ -46,6 +48,8 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     graph.add_node("account_join", account_join_node)
     graph.add_node("email_writer", email_writer_node)
     graph.add_node("verifier", verifier_node)
+    graph.add_node("approval_gate", approval_gate_node)
+    graph.add_node("sender", sender_node)
 
     graph.add_edge(START, "planner")
     graph.add_conditional_edges(
@@ -74,9 +78,11 @@ def build_graph(checkpointer: SqliteSaver | None = None):
         route_after_verifier,
         {
             "email_writer": "email_writer",
-            "planner": "planner",
+            "approval_gate": "approval_gate",
         },
     )
+    graph.add_edge("approval_gate", "sender")
+    graph.add_edge("sender", "planner")
 
     return graph.compile(checkpointer=checkpointer)
 

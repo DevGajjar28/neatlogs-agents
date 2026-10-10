@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Email approval — {{ campaign_id }}</title>
+  <style>
+    :root { color-scheme: light; --ink:#1a1f16; --muted:#5c6554; --line:#d5dccb; --accent:#2f6f4e; --warn:#8a5a12; }
+    body { font-family: "Segoe UI", sans-serif; margin:0; background: linear-gradient(160deg,#eef3e6,#f7faf3 45%,#e7eee3); color:var(--ink); }
+    main { max-width: 960px; margin: 2rem auto; padding: 0 1.25rem 3rem; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+    .muted { color: var(--muted); }
+    article { margin-top: 1.25rem; padding: 1rem 0; border-top: 1px solid var(--line); }
+    .badge { display:inline-block; padding:0.15rem 0.45rem; border:1px solid var(--line); border-radius:4px; font-size:0.8rem; }
+    .badge.warn { border-color: var(--warn); color: var(--warn); }
+    pre, .body { background:#fff; border:1px solid var(--line); padding:0.75rem; white-space:pre-wrap; }
+    button { margin-top: 1rem; background: var(--accent); color:#fff; border:0; border-radius:6px; padding:0.65rem 1.1rem; font-weight:600; cursor:pointer; }
+    label { display:block; margin-top:0.6rem; font-weight:600; }
+    input[type=text], textarea { width:100%; padding:0.5rem; border:1px solid var(--line); border-radius:6px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Email approval</h1>
+    <p class="muted">Campaign <strong>{{ campaign_id }}</strong>
+      {% if waiting %}— human gate 2{% elif request.query_params.get('done') %}— resumed{% endif %}
+    </p>
+
+    {% for item in items %}
+    <article>
+      <h2>{{ item.name }} · {{ item.title }}</h2>
+      <p>
+        {{ item.email }}
+        {% if item.email_confidence == 'guessed' %}
+        <span class="badge warn">guessed — needs explicit allow</span>
+        {% else %}
+        <span class="badge">{{ item.email_confidence }}</span>
+        {% endif %}
+      </p>
+      <p><strong>Subject:</strong> {{ (item.draft or {}).get('subject') }}</p>
+      <div class="body">{{ (item.draft or {}).get('body') }}</div>
+      <p class="muted">Citations: {{ (item.cited_evidence_ids or []) | join(', ') }}</p>
+      <p class="muted">Verifier: {{ (item.verifier or {}).get('action') }} / passed={{ (item.verifier or {}).get('passed') }}</p>
+    </article>
+    {% else %}
+    <p class="muted">No drafts in the approval queue.</p>
+    {% endfor %}
+
+    {% if waiting and items %}
+    <form method="post" action="/campaigns/{{ campaign_id }}/emails/approve">
+      <label><input type="checkbox" name="allow_guessed" value="1" checked /> Allow guessed emails</label>
+      <button type="submit">Approve all and send step 1</button>
+    </form>
+    {% endif %}
+  </main>
+</body>
+</html>

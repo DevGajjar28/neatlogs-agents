@@ -133,10 +133,10 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
         plan["next_verify"] = "redraft"
     elif all_terminal or drafts:
         plan["next_verify"] = "pass"
-        plan["phase"] = "after_email"
+        plan["phase"] = "awaiting_approval"
     else:
         plan["next_verify"] = "pass"
-        plan["phase"] = "after_email"
+        plan["phase"] = "awaiting_approval"
 
     # Guessed emails always flagged for human approval later.
     for contact_id, contact in contacts.items():
@@ -159,11 +159,11 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def route_after_verifier(state: dict[str, Any]) -> Literal["email_writer", "planner"]:
+def route_after_verifier(state: dict[str, Any]) -> Literal["email_writer", "approval_gate"]:
     nxt = (state.get("plan") or {}).get("next_verify") or "pass"
     if nxt == "redraft":
         return "email_writer"
-    return "planner"
+    return "approval_gate"
 
 
 def verify_draft(
