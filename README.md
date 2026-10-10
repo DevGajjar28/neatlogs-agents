@@ -32,6 +32,12 @@ After `.env` is filled, `python cli.py ping-llm` sends one short Bedrock call th
 
 DevGajjar28
 
+## Evidence
+
+- neatlogs: workflow traces for `llm-smoke`, `doctor-crustdata`, and `outbound-v0` (campaign `v0-posthog-live2`)
+- Entire checkpoint: `https://entire.io/gh/DevGajjar28/neatlogs-agents/commit/<FULL_SHA>` (checkpoint ID: fill after first linked commit)
+- Best submission pick: prefer a recovery commit that links a neatlogs failure trace ID in the message (`[trace: <id>]`)
+
 ## Limitations
 
 This is a hackathon build. It is not legal advice on outreach. Rules such as GDPR and India's DPDP Act vary by region. Nothing is sent until a verifier and a person approve it, and demo sends stay on the local catcher.

@@ -44,6 +44,13 @@ Not available yet. Local: `python cli.py run --company-name PostHog --website ht
 ## Known limitations and next steps
 v0 has no planner, verifier, human gates, fallback chain, or sender. Person-search replay can miss when LLM role titles change. Default `DATA_MODE=replay`. Live people search disabled on this Crustdata plan.
 
+### 2026-10-10 19:50 IST
+- Completed: Entire CLI 0.11.4 installed; logged in as github:DevGajjar28; `entire enable -y --agent cursor` wrote `.entire/settings.json` and Cursor hooks. First checkpoint commit for this setup.
+- Planned: Entire Graph plugin + Phase 4 planner/ICP gate.
+- Tests run: `entire version`; `entire status` (Enabled · Cursor); `entire checkpoint explain HEAD` after this commit.
+- Failures remaining: prior Phase 1–3 commits have no session transcripts (expected). Graph not installed yet.
+- Evidence: Entire checkpoint URL + ID recorded in README Evidence after this commit.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window
