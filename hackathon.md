@@ -49,7 +49,7 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Planned: Entire Graph plugin + Phase 4 planner/ICP gate.
 - Tests run: `entire version`; `entire status` (Enabled · Cursor); `entire checkpoint explain HEAD` after this commit.
 - Failures remaining: prior Phase 1–3 commits have no session transcripts (expected). Graph not installed yet.
-- Evidence: Entire checkpoint URL + ID recorded in README Evidence after this commit.
+- Evidence: https://entire.io/gh/DevGajjar28/neatlogs-agents/commit/fbc6a690a2013e1288666f3a5e75a8e1c9261aa9 (checkpoint ID: `01M4K32PNHG5B8VRZ6Z7Q2NKVK`)
 
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID

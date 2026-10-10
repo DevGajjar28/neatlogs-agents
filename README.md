@@ -35,7 +35,7 @@ DevGajjar28
 ## Evidence
 
 - neatlogs: workflow traces for `llm-smoke`, `doctor-crustdata`, and `outbound-v0` (campaign `v0-posthog-live2`)
-- Entire checkpoint: `https://entire.io/gh/DevGajjar28/neatlogs-agents/commit/<FULL_SHA>` (checkpoint ID: fill after first linked commit)
+- Entire checkpoint: https://entire.io/gh/DevGajjar28/neatlogs-agents/commit/fbc6a690a2013e1288666f3a5e75a8e1c9261aa9 (checkpoint ID: `01M4K32PNHG5B8VRZ6Z7Q2NKVK`)
 - Best submission pick: prefer a recovery commit that links a neatlogs failure trace ID in the message (`[trace: <id>]`)
 
 ## Limitations
