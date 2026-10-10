@@ -14,14 +14,72 @@ def _pending(name: str) -> None:
 
 @app.command()
 def run(
-    company_name: str = typer.Option(..., help="Seller company name"),
-    website: str = typer.Option(..., help="Seller website"),
-    description: str = typer.Option("", help="Optional one-line description"),
+    company_name: str = typer.Option("PostHog", help="Seller company name"),
+    website: str = typer.Option("https://posthog.com", help="Seller website"),
+    description: str = typer.Option(
+        "Product analytics and feature flags for engineers",
+        help="Optional one-line description",
+    ),
     n: int = typer.Option(10, min=1, help="How many leads to keep"),
+    campaign_id: str = typer.Option("", help="Optional campaign id / thread id"),
+    chaos: str = typer.Option("", help="Comma-separated chaos flags"),
 ) -> None:
-    """Start a campaign."""
-    _ = (company_name, website, description, n)
-    _pending("run")
+    """Start a v0 campaign (linear graph, no verifier/sender)."""
+    import time
+    import uuid
+    from pathlib import Path
+
+    from app.config import clear_settings_cache, get_settings
+    from app.graph import build_v0_graph, initial_state, open_checkpointer
+    from app.infra.chaos import set_chaos
+    from app.infra.tracing import callbacks, finish, init_tracing
+    from app.persist import persist_v0_run
+    from app.reporter.run_report import write_v0_report
+
+    from dotenv import load_dotenv
+
+    # Load .env defaults first; process env (DATA_MODE=live etc.) wins.
+    load_dotenv(override=False)
+    clear_settings_cache()
+    settings = get_settings()
+    if chaos:
+        set_chaos(chaos)
+
+    cid = campaign_id.strip() or f"v0-{uuid.uuid4().hex[:10]}"
+    init_tracing("outbound-v0")
+    typer.echo(f"DATA_MODE={settings.data_mode}")
+    conn, checkpointer = open_checkpointer()
+    started = time.time()
+    try:
+        app_graph = build_v0_graph(checkpointer)
+        state = initial_state(
+            campaign_id=cid,
+            company_name=company_name,
+            website=website,
+            description=description,
+            n=n,
+            mode=settings.data_mode,
+        )
+        result = app_graph.invoke(
+            state,
+            config={
+                "callbacks": callbacks(),
+                "configurable": {"thread_id": cid},
+                "metadata": {"campaign_id": cid, "version": "v0"},
+            },
+        )
+        persist_v0_run(result)
+        report_path = write_v0_report(result, wall_seconds=time.time() - started)
+        typer.echo(f"campaign_id={cid}")
+        typer.echo(f"companies={len(result.get('companies') or [])}")
+        typer.echo(f"contacts={len(result.get('contacts') or [])}")
+        typer.echo(f"drafts={sum(len(v) for v in (result.get('drafts') or {}).values())}")
+        typer.echo(f"credits={(result.get('budget') or {}).get('credits_spent')}")
+        typer.echo(f"report={report_path}")
+        typer.echo(f"db={Path(settings.db_path)}")
+    finally:
+        conn.close()
+        finish()
 
 
 @app.command()

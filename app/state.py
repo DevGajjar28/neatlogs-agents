@@ -1,30 +1,22 @@
 """LangGraph campaign state."""
 
-from typing import TypedDict
-
-from app.models import (
-    AccountBrief,
-    Company,
-    Contact,
-    EmailDraft,
-    ICPProposal,
-    SellerBrief,
-    VerifierResult,
-)
+from typing import Any, TypedDict
 
 
-class CampaignState(TypedDict):
+class CampaignState(TypedDict, total=False):
     campaign_id: str
-    input: dict  # company_name, website, description, n, mode
-    plan: dict  # planner step list + credit budget per step
-    budget: dict  # planned vs spent credits, tokens
-    seller: SellerBrief | None
-    icp: ICPProposal | None
-    companies: list[Company]
-    contacts: list[Contact]
-    accounts: dict[str, AccountBrief]
-    drafts: dict[str, list[EmailDraft]]  # contact_id -> sequence
-    verifier: dict[str, VerifierResult]
-    events: list[dict]  # replans, fallbacks, recoveries (also traced)
-    errors: list[dict]
-    halt_reason: str | None  # budget_exhausted | awaiting_icp | awaiting_send_approval | out_of_credits
+    input: dict
+    plan: dict
+    budget: dict
+    seller: dict | None
+    icp: dict | None
+    companies: list
+    contacts: list
+    accounts: dict
+    drafts: dict
+    verifier: dict
+    events: list
+    errors: list
+    halt_reason: str | None
+    # Allow forward-compatible keys without breaking the graph.
+    extras: Any

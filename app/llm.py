@@ -16,7 +16,8 @@ Kind = Literal["strong", "fast"]
 
 def _prepare_aws_env() -> None:
     """Load .env and drop an empty AWS_PROFILE so boto3 does not look for profile ''."""
-    load_dotenv(override=True)
+    # Do not override existing process env (e.g. DATA_MODE=live from the CLI).
+    load_dotenv(override=False)
     profile = os.getenv("AWS_PROFILE")
     if profile is not None and not profile.strip():
         os.environ.pop("AWS_PROFILE", None)

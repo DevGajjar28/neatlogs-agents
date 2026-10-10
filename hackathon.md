@@ -31,11 +31,18 @@ LangGraph, AWS Bedrock (ChatBedrockConverse), neatlogs, Entire, cfo.ai, Crustdat
 - Failures remaining: Entire CLI still missing. Agent graph not started. Keep `DATA_MODE=replay` by default.
 - Evidence: neatlogs workflow `doctor-crustdata`; fixture on disk; ledger credits 0.15 then cache hit.
 
+### 2026-10-10 19:30 IST
+- Completed: Phase 3 v0 linear LangGraph (product → buyer → account → email). Web fetch via httpx+BeautifulSoup. Drafts persisted to SQLite. Gate 1 live run `v0-posthog-live2`: 10 companies, 3 contacts, 3 drafts, 43.81 credits. Replay `v0-posthog-replay2`: 10 companies, 0 credits (person-search titles still LLM-variant). Report: `reports/v0.md`. Fixed `load_dotenv(override=True)` clobbering `DATA_MODE`.
+- Planned: Phase 4 planner + ICP human gate.
+- Tests run: live + replay CLI runs on PostHog N=10; prior unit tests still green.
+- Failures remaining: v0 finds few contacts (no fallback chain); Entire CLI still missing; you post X #2 and commit/checkpoint.
+- Evidence: neatlogs workflow `outbound-v0` / campaign `v0-posthog-live2`; `reports/v0.md`; DB drafts.
+
 ## Demo
-Not available yet.
+Not available yet. Local: `python cli.py run --company-name PostHog --website https://posthog.com --n 10`
 
 ## Known limitations and next steps
-Agent graph, verifier, and sender are not implemented. Demo mail will use a local SMTP catcher, not Docker. Default `DATA_MODE=replay`. Live people search and dedicated contact enrich are disabled on this Crustdata plan.
+v0 has no planner, verifier, human gates, fallback chain, or sender. Person-search replay can miss when LLM role titles change. Default `DATA_MODE=replay`. Live people search disabled on this Crustdata plan.
 
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
