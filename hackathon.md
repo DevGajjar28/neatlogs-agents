@@ -87,6 +87,13 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: this replay ICP still yields 0 companies after widen (fixture/filter mismatch); not a B0 blocker. UI list APIs not started (U1).
 - Evidence: campaign `b0-kill-prod`; reports on disk; unit coverage for guessed skip + kill_after + purge/redact.
 
+### 2026-10-11 00:25 IST
+- Completed: Phase 8 Gate 2 evidence pack. Live v1 `v1-posthog-live1` (PostHog N=10): 10 companies, 10 contacts, 4 verifier passes / 6 drops, **5.31 credits/qualified lead** (v0-live2 was 14.60). Chaos `p8-chaos-live2` with `crust_429,empty_people,llm_bad_json` (implemented missing `llm_bad_json` in `app/llm.py`). Kill+resume `p8-kill1`. Filled `reports/comparison.md` (07 template) + `docs/business-plan/measured-inputs.md` + `SUMMARY.md`. README evidence updated.
+- Planned: paste neatlogs trace URLs; export cfo.ai PDF into `docs/business-plan/`; start Mailpit for send screenshot; U1 or Phase 9 polish.
+- Tests run: suite still green after `llm_bad_json` (re-run if needed).
+- Failures remaining: no Mailpit → 0 emails sent; crust_429 retries in client (stdout) without a state event; cfo.ai export is manual; token/$ from neatlogs not filled in the table yet.
+- Evidence: `reports/comparison.md`, `reports/v1-posthog-live1.md`, campaigns `v1-posthog-live1` / `p8-chaos-live2` / `p8-kill1`.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

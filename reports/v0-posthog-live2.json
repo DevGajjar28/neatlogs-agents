@@ -1,0 +1,150 @@
+{
+  "campaign_id": "v0-posthog-live2",
+  "seller": "PostHog",
+  "n": 10,
+  "data_mode": "live",
+  "credits_spent": 43.81,
+  "credits_by_step": {
+    "account.enrich": 20.0,
+    "account.person_enrich": 6.0,
+    "account.person_search": 0.91,
+    "buyer.autocomplete": 0.0,
+    "buyer.customers_enrich": 16.0,
+    "buyer.customers_identify": 0.0,
+    "buyer.search": 0.9,
+    "product.customers_identify": 0.0,
+    "product.enrich": 0.0,
+    "product.identify": 0.0
+  },
+  "cache_hit_rate": 0.06060606060606061,
+  "cache_hits": 2,
+  "cache_total": 33,
+  "tokens": null,
+  "llm_cost": null,
+  "tokens_note": "unavailable locally; read neatlogs dashboard for the campaign",
+  "wall_clock_seconds": 0.0,
+  "companies_found": 10,
+  "companies_kept": 10,
+  "companies_dropped": 0,
+  "contacts_found": 3,
+  "contacts_by_fallback_step": {},
+  "verifier_pass": 0,
+  "verifier_redraft": 0,
+  "verifier_downgrade": 0,
+  "verifier_drop": 0,
+  "emails_sent": 0,
+  "followups_sent": 0,
+  "followups_cancelled": 0,
+  "recoveries_by_type": {},
+  "cost_per_qualified_lead": 14.603333333333333,
+  "qualified_leads": 3,
+  "errors": 0,
+  "events": 25,
+  "halt_reason": null,
+  "reconciled": null,
+  "reconcile_note": "not reconciled (DATA_MODE=replay; usage/events skipped)",
+  "events_sample": [
+    {
+      "type": "product.customers_identified",
+      "count": 8
+    },
+    {
+      "type": "buyer.search",
+      "strategy": "ranked",
+      "count": 30
+    },
+    {
+      "type": "buyer.kept",
+      "count": 10,
+      "low_confidence_icp": false
+    },
+    {
+      "type": "account.enriched",
+      "count": 10
+    },
+    {
+      "type": "account.contact_from_people",
+      "company_id": "631460"
+    },
+    {
+      "type": "account.contact_from_search",
+      "company_id": "631460"
+    },
+    {
+      "type": "account.contact_from_people",
+      "company_id": "1044059"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "1044059"
+    },
+    {
+      "type": "account.contact_from_people",
+      "company_id": "635058"
+    },
+    {
+      "type": "account.contact_from_search",
+      "company_id": "635058"
+    },
+    {
+      "type": "account.contact_from_people",
+      "company_id": "665759"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "665759"
+    },
+    {
+      "type": "account.contact_from_people",
+      "company_id": "900016"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "900016"
+    },
+    {
+      "type": "account.contact_from_people",
+      "company_id": "654681"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "654681"
+    },
+    {
+      "type": "account.contact_from_people",
+      "company_id": "954959"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "954959"
+    },
+    {
+      "type": "account.contact_from_people",
+      "company_id": "633948"
+    },
+    {
+      "type": "account.contact_from_search",
+      "company_id": "633948"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "9743260"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "650254"
+    },
+    {
+      "type": "email.drafted",
+      "contact_id": "631460:keren-arush-friedman"
+    },
+    {
+      "type": "email.drafted",
+      "contact_id": "635058:nils-wloka"
+    },
+    {
+      "type": "email.drafted",
+      "contact_id": "633948:hongbin-ma"
+    }
+  ]
+}

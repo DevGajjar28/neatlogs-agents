@@ -120,6 +120,8 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
             extracted = _ExtractedSeller.model_validate(extracted)
     except Exception as exc:  # noqa: BLE001 — v0 soft-fail to heuristics
         errors.append({"step": "product_researcher.llm", "error": str(exc)})
+        if "llm_bad_json" in str(exc):
+            events.append({"type": "recovery.llm_bad_json", "step": "product_researcher"})
         extracted = _ExtractedSeller(
             one_liner=description or f"{company_name} product",
             products=[company_name],

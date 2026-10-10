@@ -57,4 +57,42 @@ def get_llm(kind: Kind = "strong"):
         kwargs["credentials_profile_name"] = settings.aws_profile
 
     llm = ChatBedrockConverse(**kwargs)
-    return llm.with_config({"callbacks": callbacks()})
+    configured = llm.with_config({"callbacks": callbacks()})
+    return _ChaosLlmProxy(configured)
+
+
+class _ChaosLlmProxy:
+    """Optional chaos: first invoke / structured invoke raises llm_bad_json once."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def invoke(self, *args, **kwargs):
+        from app.infra.chaos import get_chaos
+
+        get_chaos().maybe_bad_llm_json()
+        return self._inner.invoke(*args, **kwargs)
+
+    def with_structured_output(self, *args, **kwargs):
+        structured = self._inner.with_structured_output(*args, **kwargs)
+        return _ChaosStructuredProxy(structured)
+
+    def with_config(self, *args, **kwargs):
+        return _ChaosLlmProxy(self._inner.with_config(*args, **kwargs))
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+
+class _ChaosStructuredProxy:
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def invoke(self, *args, **kwargs):
+        from app.infra.chaos import get_chaos
+
+        get_chaos().maybe_bad_llm_json()
+        return self._inner.invoke(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)

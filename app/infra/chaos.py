@@ -44,12 +44,20 @@ class ChaosConfigError(ValueError):
     """Invalid chaos flag (e.g. bad kill_after node)."""
 
 
+class ChaosLlmBadJson(RuntimeError):
+    """Injected once when --chaos llm_bad_json is set."""
+
+    def __init__(self) -> None:
+        super().__init__("chaos:llm_bad_json")
+
+
 @dataclass
 class ChaosController:
     flags: set[str] = field(default_factory=set)
     kill_after: str | None = None
     _429_seen: set[str] = field(default_factory=set)
     _403_fields_fired: bool = False
+    llm_bad_fired: bool = False
 
     @classmethod
     def from_csv(cls, raw: str | None) -> "ChaosController":
@@ -103,6 +111,12 @@ class ChaosController:
                     }
                 },
             )
+
+    def maybe_bad_llm_json(self) -> None:
+        """Raise once so the caller falls back (invalid structured JSON)."""
+        if "llm_bad_json" in self.flags and not self.llm_bad_fired:
+            self.llm_bad_fired = True
+            raise ChaosLlmBadJson()
 
 
 def _resolve_kill_node(node: str) -> str:

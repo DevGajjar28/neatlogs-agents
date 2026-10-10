@@ -43,7 +43,12 @@ DevGajjar28
 
 ## Evidence
 
-- neatlogs: workflow traces for `llm-smoke`, `doctor-crustdata`, and `outbound-v0` (campaign `v0-posthog-live2`)
+- **v0 vs v1:** [`reports/comparison.md`](reports/comparison.md) — PostHog N=10; credits/qualified lead **14.60 → 5.31**; contacts **3 → 10**
+- **v1 run:** campaign `v1-posthog-live1` (neatlogs: filter Traces by campaign id; set `NEATLOGS_TRACES_URL` in `.env`)
+- **v0 run:** campaign `v0-posthog-live2`
+- **Chaos:** `p8-chaos-live2` with `--chaos crust_429,empty_people,llm_bad_json` — events `recovery.llm_bad_json`, `chaos.empty_people`, `recovery.explain_retry`
+- **Kill + resume:** `p8-kill1` / `b0-kill-prod` — `kill_after=account_researcher` then `resume` at 0 new credits (cache)
+- **Business plan inputs:** [`docs/business-plan/`](docs/business-plan/) (paste into cfo.ai; export PDF/screens there)
 - Entire checkpoint: https://entire.io/gh/DevGajjar28/neatlogs-agents/commit/fbc6a690a2013e1288666f3a5e75a8e1c9261aa9 (checkpoint ID: `01M4K32PNHG5B8VRZ6Z7Q2NKVK`)
 - Best submission pick: prefer a recovery commit that links a neatlogs failure trace ID in the message (`[trace: <id>]`)
 

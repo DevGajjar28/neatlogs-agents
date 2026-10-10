@@ -1,0 +1,330 @@
+{
+  "campaign_id": "v1-posthog-live1",
+  "seller": "PostHog",
+  "n": 10,
+  "data_mode": "live",
+  "credits_spent": 53.06,
+  "credits_by_step": {
+    "account.enrich": 26.0,
+    "account.news_web": 2.0,
+    "account.person_enrich_batch": 20.0,
+    "account.person_search.explain": 0.0,
+    "account.person_search.semantic": 3.12,
+    "account.person_search": 1.04,
+    "buyer.autocomplete": 0.0,
+    "buyer.customers_enrich": 0.0,
+    "buyer.customers_identify": 0.0,
+    "buyer.search_lookalike": 0.0,
+    "buyer.search": 0.9,
+    "doctor": 0.0,
+    "product.customers_identify": 0.0,
+    "product.enrich": 0.0,
+    "product.identify": 0.0
+  },
+  "cache_hit_rate": 0.2459016393442623,
+  "cache_hits": 15,
+  "cache_total": 61,
+  "tokens": null,
+  "llm_cost": null,
+  "tokens_note": "unavailable locally; read neatlogs dashboard for the campaign",
+  "wall_clock_seconds": 300,
+  "companies_found": 30,
+  "companies_kept": 10,
+  "companies_dropped": 20,
+  "contacts_found": 10,
+  "contacts_by_fallback_step": {
+    "fallback.contact_step_2": 10
+  },
+  "verifier_pass": 4,
+  "verifier_redraft": 0,
+  "verifier_downgrade": 0,
+  "verifier_drop": 6,
+  "emails_sent": 0,
+  "followups_sent": 0,
+  "followups_cancelled": 0,
+  "recoveries_by_type": {
+    "recovery.explain_retry": 9,
+    "recovery.send_retry": 4
+  },
+  "cost_per_qualified_lead": 5.306,
+  "qualified_leads": 10,
+  "errors": 4,
+  "events": 80,
+  "halt_reason": null,
+  "reconciled": null,
+  "reconcile_note": "not reconciled (DATA_MODE=replay; usage/events skipped)",
+  "events_sample": [
+    {
+      "type": "plan.start",
+      "n": 10,
+      "estimated_credits": 100.0,
+      "max_credits": 400
+    },
+    {
+      "type": "product.customers_identified",
+      "count": 8
+    },
+    {
+      "type": "buyer.icp_proposed",
+      "industries": [
+        "Sporting Goods Manufacturing",
+        "Advertising Services",
+        "IT Services and IT Consulting"
+      ],
+      "countries": [
+        "Italy",
+        "USA"
+      ],
+      "employee_count_ranges": [
+        "1001-5000",
+        "51-200",
+        "201-500"
+      ],
+      "low_confidence_icp": false,
+      "customer_profiles": 8
+    },
+    {
+      "type": "icp.approved",
+      "edited_by_user": true,
+      "industries": [
+        "Software Development",
+        "SaaS",
+        "IT Services and IT Consulting",
+        "Advertising Services",
+        "Computer Software"
+      ],
+      "countries": [
+        "USA",
+        "GBR",
+        "DEU",
+        "France",
+        "Italy"
+      ]
+    },
+    {
+      "type": "buyer.search",
+      "strategy": "competitors",
+      "count": 0
+    },
+    {
+      "type": "buyer.search",
+      "strategy": "ranked",
+      "count": 30
+    },
+    {
+      "type": "buyer.kept",
+      "count": 10,
+      "pool": 30,
+      "buffer": 20,
+      "n": 10
+    },
+    {
+      "type": "account.enriched",
+      "count": 10
+    },
+    {
+      "type": "account.news_web_fallback",
+      "company_id": "1810629"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "1810629",
+      "culprit_paths": [
+        "filters.conditions[0]",
+        "filters.conditions[2]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all",
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "1810629",
+      "source": "person_search_semantic"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "1084587",
+      "culprit_paths": [
+        "filters.conditions[0]",
+        "filters.conditions[2]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all",
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "1084587",
+      "source": "person_search_semantic"
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "634663",
+      "source": "person_search"
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "1476562",
+      "source": "person_search"
+    },
+    {
+      "type": "account.news_web_fallback",
+      "company_id": "1807602"
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "1807602",
+      "source": "person_search"
+    },
+    {
+      "type": "account.news_web_fallback",
+      "company_id": "2876268"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "2876268",
+      "culprit_paths": [
+        "filters.conditions[0]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.skipped_not_enabled",
+      "company_id": "2876268",
+      "endpoint": "/person/professional_network/search/live"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "15375838",
+      "culprit_paths": [
+        "filters.conditions[0]",
+        "filters.conditions[2]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all",
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "15375838",
+      "source": "person_search_semantic"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "1781635",
+      "culprit_paths": [
+        "filters.conditions[0]",
+        "filters.conditions[2]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all",
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "1781635",
+      "source": "person_search_semantic"
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "635089",
+      "source": "person_search"
+    },
+    {
+      "type": "account.news_web_fallback",
+      "company_id": "954039"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "954039",
+      "culprit_paths": [
+        "filters.conditions[0]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.skipped_not_enabled",
+      "company_id": "954039",
+      "endpoint": "/person/professional_network/search/live"
+    },
+    {
+      "type": "account.person_enrich_batch",
+      "count": 8
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "2876268"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "954039"
+    },
+    {
+      "type": "plan.replace_no_contact",
+      "promoted": 2,
+      "company_ids": [
+        "68681809",
+        "642116"
+      ],
+      "kept_before": 8,
+      "n": 10
+    },
+    {
+      "type": "account.enriched",
+      "count": 2
+    },
+    {
+      "type": "account.news_web_fallback",
+      "company_id": "68681809"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "68681809",
+      "culprit_paths": [
+        "filters.conditions[0]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.skipped_not_enabled",
+      "company_id": "68681809",
+      "endpoint": "/person/professional_network/search/live"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "642116",
+      "culprit_paths": [
+        "filters.conditions[0]",
+        "filters.conditions[2]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all",
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.contact_step_2",
+      "company_id": "642116",
+      "source": "person_search_semantic"
+    },
+    {
+      "type": "account.person_enrich_batch",
+      "count": 1
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "68681809"
+    }
+  ]
+}

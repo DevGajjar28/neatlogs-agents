@@ -219,6 +219,12 @@ class CrustdataClient:
                 if attempts_429 > MAX_RETRIES_429:
                     raise RateLimited(float(headers.get("x-ratelimit-reset", 1)))
                 reset = headers.get("x-ratelimit-reset") or headers.get("Retry-After") or "1"
+                # Side-channel note for reports (agents also see retries via latency/traces).
+                print(
+                    f"recovery.rate_limit endpoint={endpoint} attempt={attempts_429} "
+                    f"sleep={reset}s campaign={campaign_id}",
+                    flush=True,
+                )
                 time.sleep(float(reset) + random.uniform(0.05, 0.35))
                 continue
 

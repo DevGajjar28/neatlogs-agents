@@ -79,6 +79,8 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
             draft = _IcpDraft.model_validate(draft)
     except Exception as exc:  # noqa: BLE001
         errors.append({"step": "buyer.icp_llm", "error": str(exc)})
+        if "llm_bad_json" in str(exc):
+            events.append({"type": "recovery.llm_bad_json", "step": "buyer_propose_icp"})
         draft = _IcpDraft(
             economic_buyer_titles=["VP Engineering", "CTO", "Head of Product"],
             champion_titles=["Engineering Manager", "Product Manager"],
