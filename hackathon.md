@@ -65,6 +65,13 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: live people search wrapper still skipped (endpoint disabled on plan). Full live campaign not re-run to save credits.
 - Evidence: unit events `chaos.empty_people`, `recovery.explain_retry`, `fallback.contact_step_2`, `plan.replace_no_contact`.
 
+### 2026-10-10 20:40 IST
+- Completed: Phase 6 email writer (3-step sequence, role tone, opt-out, length caps) + verifier (deterministic then LLM judge) with redraft≤2 → downgrade/drop. Graph: `email_writer` → `verifier` → redraft loop or planner. `web.scan_for_injection` + `--chaos poisoned_page`; product researcher emits `security.injection_quarantined`.
+- Planned: Phase 7 sender, scheduler, approval UI (human gate 2).
+- Tests run: `pytest tests/test_verifier.py` (+ regressions) — 19 passed; reject→redraft→pass loop mocked; **0 live Crustdata**.
+- Failures remaining: human gate 2 / Mailpit send not built yet.
+- Evidence: unit events `verify.reject`, `verify.redraft`, `verify.pass`; injection quarantine unit coverage.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

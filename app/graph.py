@@ -1,6 +1,6 @@
 """LangGraph StateGraph builder for SignalSDR.
 
-Phase 5: planner between stages, ICP gate, account enrich + Send fan-out + join.
+Phase 6: writer → verifier with redraft loop; account Send fan-out; ICP gate.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from app.agents.buyer_finder import buyer_propose_icp_node, buyer_search_node, i
 from app.agents.email_writer import email_writer_node
 from app.agents.planner import planner_node, route_after_planner
 from app.agents.product_researcher import product_researcher_node
+from app.agents.verifier import route_after_verifier, verifier_node
 from app.config import get_settings
 from app.state import CampaignState
 
@@ -30,14 +31,6 @@ def _product_node(state: dict[str, Any]) -> dict[str, Any]:
 
     result = product_researcher_node(state)
     result["plan"] = set_plan_phase({**state, **result}, "after_product")
-    return result
-
-
-def _email_node(state: dict[str, Any]) -> dict[str, Any]:
-    from app.agents.planner import set_plan_phase
-
-    result = email_writer_node(state)
-    result["plan"] = set_plan_phase({**state, **result}, "after_email")
     return result
 
 
@@ -51,7 +44,8 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     graph.add_node("account_enrich", account_enrich_node)
     graph.add_node("account_company", account_company_node)
     graph.add_node("account_join", account_join_node)
-    graph.add_node("email_writer", _email_node)
+    graph.add_node("email_writer", email_writer_node)
+    graph.add_node("verifier", verifier_node)
 
     graph.add_edge(START, "planner")
     graph.add_conditional_edges(
@@ -74,13 +68,21 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     graph.add_conditional_edges("account_enrich", fanout_account_companies)
     graph.add_edge("account_company", "account_join")
     graph.add_edge("account_join", "planner")
-    graph.add_edge("email_writer", "planner")
+    graph.add_edge("email_writer", "verifier")
+    graph.add_conditional_edges(
+        "verifier",
+        route_after_verifier,
+        {
+            "email_writer": "email_writer",
+            "planner": "planner",
+        },
+    )
 
     return graph.compile(checkpointer=checkpointer)
 
 
 def build_v0_graph(checkpointer: SqliteSaver | None = None):
-    """Backward-compatible alias — Phase 4+ uses the planner graph."""
+    """Backward-compatible alias."""
     return build_graph(checkpointer=checkpointer)
 
 

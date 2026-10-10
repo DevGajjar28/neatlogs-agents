@@ -42,6 +42,16 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
     pages = web.fetch_seller_pages(website)
     page_blob = "\n\n".join(f"URL: {p['url']}\n{p['text'][:3000]}" for p in pages)[:14000]
 
+    for page in pages:
+        for snippet in page.get("quarantined") or []:
+            events.append(
+                {
+                    "type": "security.injection_quarantined",
+                    "url": page.get("url"),
+                    "snippet": str(snippet)[:200],
+                }
+            )
+
     for page in pages[:3]:
         snippet = page["text"][:160]
         if snippet:
