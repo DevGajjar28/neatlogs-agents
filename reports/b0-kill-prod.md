@@ -1,0 +1,174 @@
+# SignalSDR run report — `b0-kill-prod`
+
+- generated_at: 2026-10-10T18:32:26.369910+00:00
+- seller: PostHog
+- n: 5
+- data_mode: replay
+- wall_clock_seconds: 0.0
+- crustdata_credits_spent: 0.0
+- cache_hit_rate: 100.00%
+- companies_found/kept/dropped: 0/0/0
+- contacts_found: 0
+- contacts_by_fallback_step: {}
+- verifier pass/redraft/downgrade/drop: 0/0/0/0
+- emails_sent: 0
+- followups_sent/cancelled: 0/0
+- recoveries_by_type: {}
+- cost_per_qualified_lead: None
+- tokens/llm_cost: None/None (unavailable locally; read neatlogs dashboard for the campaign)
+- reconciled: None — not reconciled (DATA_MODE=replay; usage/events skipped)
+- halt_reason: None
+- errors: 9
+
+## Credits by step
+
+```json
+{
+  "buyer.autocomplete": 0.0,
+  "buyer.customers_enrich": 0.0,
+  "buyer.customers_identify": 0.0,
+  "product.customers_identify": 0.0,
+  "product.enrich": 0.0,
+  "product.identify": 0.0
+}
+```
+
+## Events (truncated, redacted)
+
+```json
+[
+  {
+    "type": "plan.start",
+    "n": 5,
+    "estimated_credits": 60.0,
+    "max_credits": 400
+  },
+  {
+    "type": "product.customers_identified",
+    "count": 8
+  },
+  {
+    "type": "chaos.kill_after",
+    "after_node": "product_researcher"
+  },
+  {
+    "type": "buyer.icp_proposed",
+    "industries": [
+      "Sporting Goods Manufacturing",
+      "Advertising Services",
+      "IT Services and IT Consulting"
+    ],
+    "countries": [
+      "Italy",
+      "USA"
+    ],
+    "employee_count_ranges": [
+      "***00",
+      "51-200",
+      "201-500"
+    ],
+    "low_confidence_icp": false,
+    "customer_profiles": 8
+  },
+  {
+    "type": "icp.approved",
+    "edited_by_user": true,
+    "industries": [
+      "Sporting Goods Manufacturing",
+      "Advertising Services",
+      "IT Services and IT Consulting"
+    ],
+    "countries": [
+      "Italy",
+      "USA"
+    ]
+  },
+  {
+    "type": "buyer.kept",
+    "count": 0,
+    "pool": 0,
+    "buffer": 0,
+    "n": 5
+  },
+  {
+    "type": "replan.widen_icp",
+    "widening": 1,
+    "kept": 0,
+    "n": 5,
+    "industries": [
+      "Sporting Goods Manufacturing",
+      "Advertising Services",
+      "IT Services and IT Consulting"
+    ],
+    "employee_count_ranges": [
+      "***00",
+      "51-200",
+      "201-500",
+      "***00",
+      "5001-10000",
+      "11-50"
+    ],
+    "countries": [
+      "Italy",
+      "USA"
+    ],
+    "reason": "kept 0 < N=5"
+  },
+  {
+    "type": "buyer.kept",
+    "count": 0,
+    "pool": 0,
+    "buffer": 0,
+    "n": 5
+  },
+  {
+    "type": "replan.widen_icp",
+    "widening": 2,
+    "kept": 0,
+    "n": 5,
+    "industries": [
+      "Sporting Goods Manufacturing",
+      "Advertising Services",
+      "IT Services and IT Consulting",
+      "Software Development",
+      "Technology, Information and Internet",
+      "Information Technology and Services"
+    ],
+    "employee_count_ranges": [
+      "***00",
+      "51-200",
+      "201-500",
+      "***00",
+      "5001-10000",
+      "11-50"
+    ],
+    "countries": [
+      "Italy",
+      "USA",
+      "United States"
+    ],
+    "reason": "kept 0 < N=5"
+  },
+  {
+    "type": "buyer.kept",
+    "count": 0,
+    "pool": 0,
+    "buffer": 0,
+    "n": 5
+  },
+  {
+    "type": "plan.search_thin",
+    "kept": 0,
+    "n": 5,
+    "widenings": 2,
+    "action": "continue_with_available"
+  },
+  {
+    "type": "chaos.kill_after",
+    "after_node": "account_enrich"
+  },
+  {
+    "type": "approval.empty_queue"
+  }
+]
+```

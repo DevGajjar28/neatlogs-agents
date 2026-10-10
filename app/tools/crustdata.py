@@ -284,7 +284,9 @@ class CrustdataClient:
             meta = err.get("metadata") or []
             if meta and isinstance(meta[0], dict) and "denied_fields" in meta[0]:
                 denied = list(meta[0]["denied_fields"])
-                self.cache.put_denial(key, endpoint, body, denied)
+                self.cache.put_denial(
+                    key, endpoint, body, denied, campaign_id=campaign_id
+                )
                 if not _fields_retry and isinstance(body.get("fields"), list):
                     reduced = [f for f in body["fields"] if f not in denied]
                     retry_body = {**body, "fields": reduced}
@@ -309,7 +311,7 @@ class CrustdataClient:
         if status_code >= 400:
             raise CrustdataError(f"HTTP {status_code}: {payload}")
 
-        self.cache.put(key, endpoint, body, payload, credits)
+        self.cache.put(key, endpoint, body, payload, credits, campaign_id=campaign_id)
         return payload
 
     # --- public methods ---

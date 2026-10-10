@@ -79,6 +79,14 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: real Mailpit demo still needs local catcher running for a live send smoke.
 - Evidence: unit coverage for idempotent skip, suppression, guessed deny, follow-up send + reply cancel.
 
+### 2026-10-11 00:05 IST
+- Completed: Step B0 (per `DECISIONS.md` / `docs/ui/DECISIONS.md`). (1) `kill_after=<node>` via `wrap_node` in `graph.py` — arms after named node, `os._exit(1)` on next node start after checkpoint + `chaos.kill_after` event; alias `account_researcher`→`account_enrich`. (2) `redact.mask_email` / `mask_phone` / `redact_text`. (3) `approve_all` skips guessed unless `--include-guessed` / per-contact `allow_guessed`; emits `policy.guessed_skipped`. (4) `simulate_reply` requires `DEMO_MODE=true`. (5) Structured `compute_metrics` / `compare` / `write_report`; CLI `report` + `compare`. (6) `purge_campaign` deletes SQL + cache by `campaign_id` + `SqliteSaver.delete_thread`. (7) Halt naming kept as `icp_rejected` / `icp.rejected`.
+- Planned: Phase 8 evidence (v1 run, chaos, compare v0/v1, cfo.ai), then U1 API.
+- Tests run: `pytest` — 37 passed (new `test_redact`, `test_b0_chaos_approval`, `test_b0_purge_demo_report`).
+- Acceptance B0: `run --chaos kill_after=product_researcher` exited 1; `resume b0-kill-prod` continued to ICP; `approve --yes --chaos kill_after=account_researcher` exited 1; `resume` finished with **cache_hit_rate 100% / credits 0.0**; `report` + `compare` wrote `reports/b0-kill-prod.md` and `reports/comparison.md`.
+- Failures remaining: this replay ICP still yields 0 companies after widen (fixture/filter mismatch); not a B0 blocker. UI list APIs not started (U1).
+- Evidence: campaign `b0-kill-prod`; reports on disk; unit coverage for guessed skip + kill_after + purge/redact.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

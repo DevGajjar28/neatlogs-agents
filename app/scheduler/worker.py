@@ -143,11 +143,17 @@ def run_forever(poll_seconds: float = 20.0, db_path: str | None = None) -> None:
         time.sleep(poll_seconds)
 
 
+class DemoModeRequired(RuntimeError):
+    """Raised when a demo-only action is attempted with DEMO_MODE=false."""
+
+
 def simulate_reply(lead_id: str, *, kind: str = "reply", db_path: str | None = None) -> None:
     """Insert a reply/opt_out so the next worker pass cancels remaining follow-ups."""
     if kind not in {"reply", "opt_out"}:
         raise ValueError("kind must be reply or opt_out")
     settings = get_settings()
+    if not settings.demo_mode:
+        raise DemoModeRequired("simulate_reply requires DEMO_MODE=true")
     path = db_path or settings.db_path
     init_db(path)
     conn = connect(path)

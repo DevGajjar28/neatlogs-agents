@@ -51,17 +51,22 @@ class ResponseCache:
         request: Any,
         response: Any,
         credits: float,
+        *,
+        campaign_id: str | None = None,
     ) -> None:
         conn = self._conn()
         try:
             conn.execute(
                 """
-                INSERT INTO cache (key_hash, endpoint, request_json, response_json, credits, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO cache (
+                    key_hash, endpoint, request_json, response_json, credits, created_at, campaign_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key_hash) DO UPDATE SET
                     response_json = excluded.response_json,
                     credits = excluded.credits,
-                    created_at = excluded.created_at
+                    created_at = excluded.created_at,
+                    campaign_id = COALESCE(excluded.campaign_id, cache.campaign_id)
                 """,
                 (
                     key,
@@ -70,19 +75,29 @@ class ResponseCache:
                     json.dumps(response, default=str),
                     float(credits),
                     datetime.now(timezone.utc).isoformat(),
+                    campaign_id,
                 ),
             )
             conn.commit()
         finally:
             conn.close()
 
-    def put_denial(self, key: str, endpoint: str, request: Any, denied_fields: list[str]) -> None:
+    def put_denial(
+        self,
+        key: str,
+        endpoint: str,
+        request: Any,
+        denied_fields: list[str],
+        *,
+        campaign_id: str | None = None,
+    ) -> None:
         self.put(
             key,
             endpoint,
             request,
             {"__denied_fields__": denied_fields},
             credits=0.0,
+            campaign_id=campaign_id,
         )
 
     def get_denial(self, key: str) -> list[str] | None:

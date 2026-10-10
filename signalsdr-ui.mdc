@@ -1,0 +1,39 @@
+---
+description: SignalSDR web UI and API layer — design system, backend wiring, quality bar. Use for any work in web/, app/api/, app/infra/events.py, or the run manager.
+globs: web/**,app/api/**,app/infra/events.py,cli.py,scripts/**
+alwaysApply: false
+---
+
+# SignalSDR UI + API rules
+
+Source of truth: docs/09_UI_SPEC.md (design, screens, copy, keyboard), docs/10_UI_BACKEND_INTEGRATION.md (backend wiring), docs/ui/BACKEND_MAP.md (what already exists). Hard rules in docs/01 and docs/05 still apply.
+
+## Connect to the real system, never fake it
+- No mock data, fixtures or hard-coded numbers in web/. Every value on screen comes from the API.
+- The API never runs agents in-process. Campaign runs are `cli.py run-campaign <id>` / `cli.py resume <id>` child processes started by app/api/runs.py.
+- Reuse existing functions (mailer, audit, budget, reporter, approval, purge, simulate-reply). If logic lives only in a CLI command, extract it into a function and call it from both.
+- Agents write timeline rows with `record_event(...)` and stage changes with `set_stage(...)` from app/infra/events.py, alongside existing state events. Messages are plain sentences a founder understands, with prospect emails redacted.
+- Human gates go through the `gate_decisions` table + resume. Guessed emails need `confirm_guessed: true`.
+- Every endpoint has a pydantic response model. Frontend types come only from `npm run gen:api` (openapi-typescript).
+- API binds 127.0.0.1, CORS only http://localhost:3000. Never return secrets or raw Crustdata payloads; mask emails in lists.
+- SSE (`/campaigns/{id}/stream`) is read with EventSource directly against the API base, with polling fallback.
+
+## Design system (exact values, from docs/09 §3)
+- Colors via CSS variables: bg #FAFAFA, surface #FFFFFF, surface-muted #F4F4F5, border #E4E4E7, border-strong #D4D4D8, text #18181B, text-muted #52525B, text-subtle #71717A, primary (ink) #18181B / hover #3F3F46, accent #2563EB, accent-soft #EFF6FF. Status pairs: success #15803D/#F0FDF4, warning #B45309/#FFFBEB, danger #B91C1C/#FEF2F2, info #1D4ED8/#EFF6FF, neutral #3F3F46/#F4F4F5.
+- Fonts: Geist Sans for UI, Geist Mono for ids, credits, emails, numbers (tabular-nums). Sizes: 24 page title, 16 section, 14 body/card title, 13 table, 12 meta.
+- 4px grid; page padding 24, card padding 16, gaps 16; radius 6 controls / 8 cards; borders not shadows (shadow only on drawer, dropdowns, ⌘K).
+- Sidebar 232/56px, header 56px, table rows 40px with sticky 36px header, drawers 560px (review) / 480px (forms).
+- Icons: lucide-react, 16px UI / 14px tables, stroke 1.75. No emoji.
+
+## Interaction rules
+- No modal dialogs. Details and forms open in a right-side Sheet; gates render inline in the page.
+- Every interactive element is a real button/link/input with a visible :focus-visible ring (2px accent, 2px offset). Icon-only buttons have aria-label.
+- Keyboard: ⌘K palette, N new campaign, / search, J/K rows, Enter open, A/R/E in lead drawer, Esc close, ? shortcuts.
+- Loading = skeletons, never full-page spinners. Errors = inline banner in the affected card with the next action (copy in docs/09 §6). Toasts only for completed actions, with Undo where possible.
+- Status is never color alone: badge text + dot, icons have accessible names. Text contrast ≥ 4.5:1.
+
+## Not allowed (generic AI look)
+Indigo/purple primaries, gradients, glassmorphism, big rounded-2xl shadow cards, hero sections, illustrations, stock images, emoji, Inter/Roboto, pie/donut charts, dark mode, notification bell, login/onboarding screens, placeholder lorem ipsum.
+
+## Every step ends with
+Tests run, the step's acceptance check from docs/09 §10 done, a list of what to verify by hand, and a dated entry appended to hackathon.md. Do not commit; the developer commits (Entire checkpoint).

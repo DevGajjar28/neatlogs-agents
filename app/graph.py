@@ -1,11 +1,14 @@
 """LangGraph StateGraph builder for SignalSDR.
 
 Phase 7: approval gate + sender after verifier; account Send fan-out; ICP gate.
+B0: node wrapper for kill_after chaos (exit at start of next node after checkpoint).
 """
 
 from __future__ import annotations
 
+import os
 import sqlite3
+from collections.abc import Callable
 from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -25,6 +28,7 @@ from app.agents.product_researcher import product_researcher_node
 from app.agents.sender import sender_node
 from app.agents.verifier import route_after_verifier, verifier_node
 from app.config import get_settings
+from app.infra.chaos import arm_kill_after, get_chaos, kill_armed
 from app.state import CampaignState
 
 
@@ -36,20 +40,50 @@ def _product_node(state: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def wrap_node(name: str, fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """Wrap a node for kill_after: arm after named node returns; exit on next entry."""
+
+    def _wrapped(state: dict[str, Any]) -> dict[str, Any]:
+        if kill_armed():
+            try:
+                from app.infra.tracing import finish
+
+                finish()
+            except Exception:
+                pass
+            os._exit(1)
+
+        result = fn(state)
+        if not isinstance(result, dict):
+            result = {}
+
+        target = get_chaos().kill_after
+        if target and target == name:
+            arm_kill_after()
+            events = list(result["events"]) if "events" in result else list(state.get("events") or [])
+            events.append({"type": "chaos.kill_after", "after_node": name})
+            result = {**result, "events": events}
+        return result
+
+    _wrapped.__name__ = getattr(fn, "__name__", name)
+    _wrapped.__qualname__ = getattr(fn, "__qualname__", name)
+    return _wrapped
+
+
 def build_graph(checkpointer: SqliteSaver | None = None):
     graph = StateGraph(CampaignState)
-    graph.add_node("planner", planner_node)
-    graph.add_node("product_researcher", _product_node)
-    graph.add_node("buyer_propose_icp", buyer_propose_icp_node)
-    graph.add_node("icp_gate", icp_gate_node)
-    graph.add_node("buyer_search", buyer_search_node)
-    graph.add_node("account_enrich", account_enrich_node)
-    graph.add_node("account_company", account_company_node)
-    graph.add_node("account_join", account_join_node)
-    graph.add_node("email_writer", email_writer_node)
-    graph.add_node("verifier", verifier_node)
-    graph.add_node("approval_gate", approval_gate_node)
-    graph.add_node("sender", sender_node)
+    graph.add_node("planner", wrap_node("planner", planner_node))
+    graph.add_node("product_researcher", wrap_node("product_researcher", _product_node))
+    graph.add_node("buyer_propose_icp", wrap_node("buyer_propose_icp", buyer_propose_icp_node))
+    graph.add_node("icp_gate", wrap_node("icp_gate", icp_gate_node))
+    graph.add_node("buyer_search", wrap_node("buyer_search", buyer_search_node))
+    graph.add_node("account_enrich", wrap_node("account_enrich", account_enrich_node))
+    graph.add_node("account_company", wrap_node("account_company", account_company_node))
+    graph.add_node("account_join", wrap_node("account_join", account_join_node))
+    graph.add_node("email_writer", wrap_node("email_writer", email_writer_node))
+    graph.add_node("verifier", wrap_node("verifier", verifier_node))
+    graph.add_node("approval_gate", wrap_node("approval_gate", approval_gate_node))
+    graph.add_node("sender", wrap_node("sender", sender_node))
 
     graph.add_edge(START, "planner")
     graph.add_conditional_edges(

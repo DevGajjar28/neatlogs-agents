@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS cache (
     request_json TEXT NOT NULL,
     response_json TEXT NOT NULL,
     credits REAL NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    campaign_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS budget_ledger (
@@ -112,10 +113,18 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive migrations for existing DB files."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(cache)").fetchall()}
+    if cols and "campaign_id" not in cols:
+        conn.execute("ALTER TABLE cache ADD COLUMN campaign_id TEXT")
+
+
 def init_db(db_path: str | Path) -> None:
     conn = connect(db_path)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()

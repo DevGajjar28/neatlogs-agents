@@ -91,7 +91,11 @@ def run(
     clear_settings_cache()
     settings = get_settings()
     if chaos:
-        set_chaos(chaos)
+        try:
+            set_chaos(chaos)
+        except Exception as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
 
     cid = campaign_id.strip() or f"v0-{uuid.uuid4().hex[:10]}"
     init_tracing("outbound-v0")
@@ -140,7 +144,10 @@ def run(
 
 
 @app.command()
-def resume(campaign_id: str = typer.Argument(..., help="Campaign to resume")) -> None:
+def resume(
+    campaign_id: str = typer.Argument(..., help="Campaign to resume"),
+    chaos: str = typer.Option("", help="Comma-separated chaos flags (omit kill_after to continue after a crash)"),
+) -> None:
     """Resume a campaign from the last checkpoint (not for ICP interrupt; use approve)."""
     import time
     from pathlib import Path
@@ -149,6 +156,7 @@ def resume(campaign_id: str = typer.Argument(..., help="Campaign to resume")) ->
 
     from app.config import clear_settings_cache, get_settings
     from app.graph import build_graph, open_checkpointer
+    from app.infra.chaos import set_chaos
     from app.infra.tracing import finish, init_tracing
     from app.persist import persist_v0_run
     from app.reporter.run_report import write_v0_report
@@ -156,6 +164,12 @@ def resume(campaign_id: str = typer.Argument(..., help="Campaign to resume")) ->
     load_dotenv(override=False)
     clear_settings_cache()
     settings = get_settings()
+    if chaos:
+        try:
+            set_chaos(chaos)
+        except Exception as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
     init_tracing("outbound-resume")
     conn, checkpointer = open_checkpointer()
     started = time.time()
@@ -184,6 +198,12 @@ def resume(campaign_id: str = typer.Argument(..., help="Campaign to resume")) ->
 def approve(
     campaign_id: str = typer.Argument(..., help="Campaign waiting for approval"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Approve without interactive prompt"),
+    include_guessed: bool = typer.Option(
+        False,
+        "--include-guessed",
+        help="When approving emails, also approve guessed addresses",
+    ),
+    chaos: str = typer.Option("", help="Comma-separated chaos flags for the resumed run"),
 ) -> None:
     """Approve ICP (gate 1) or email drafts (gate 2) and resume with Command(resume=...)."""
     import time
@@ -194,6 +214,7 @@ def approve(
 
     from app.config import clear_settings_cache, get_settings
     from app.graph import build_graph, open_checkpointer
+    from app.infra.chaos import set_chaos
     from app.infra.tracing import finish, init_tracing
     from app.persist import persist_v0_run
     from app.reporter.run_report import write_v0_report
@@ -201,6 +222,12 @@ def approve(
     load_dotenv(override=False)
     clear_settings_cache()
     settings = get_settings()
+    if chaos:
+        try:
+            set_chaos(chaos)
+        except Exception as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
     init_tracing("outbound-approve")
     conn, checkpointer = open_checkpointer()
     started = time.time()
@@ -252,7 +279,13 @@ def approve(
                     typer.echo("All drafts rejected")
                     return
             result = app_graph.invoke(
-                Command(resume={"approve_all": True, "actor": "cli"}),
+                Command(
+                    resume={
+                        "approve_all": True,
+                        "actor": "cli",
+                        "include_guessed": include_guessed,
+                    }
+                ),
                 config=config,
             )
         else:
@@ -285,10 +318,27 @@ def serve_ui(port: int = typer.Option(8080, help="Local port")) -> None:
 
 
 @app.command()
-def report(campaign_id: str = typer.Argument(..., help="Campaign to report")) -> None:
-    """Write a run report for a campaign."""
-    _ = campaign_id
-    _pending("report")
+def report(
+    campaign_id: str = typer.Argument(..., help="Campaign to report"),
+    baseline: str = typer.Option("", "--baseline", help="Optional baseline campaign id"),
+) -> None:
+    """Write a structured run report (markdown + JSON) for a campaign."""
+    from app.reporter.run_report import write_report
+
+    path = write_report(campaign_id, baseline_id=baseline or None)
+    typer.echo(f"report={path}")
+
+
+@app.command()
+def compare(
+    baseline_id: str = typer.Argument(..., help="Baseline campaign id"),
+    campaign_id: str = typer.Argument(..., help="Current campaign id"),
+) -> None:
+    """Write reports/comparison.md for two campaigns."""
+    from app.reporter.run_report import write_comparison
+
+    path = write_comparison(baseline_id, campaign_id)
+    typer.echo(f"comparison={path}")
 
 
 @app.command("simulate-reply")
@@ -297,9 +347,13 @@ def simulate_reply_cmd(
     opt_out: bool = typer.Option(False, "--opt-out", help="Record as opt-out instead of reply"),
 ) -> None:
     """Insert a demo reply so follow-ups stop."""
-    from app.scheduler.worker import simulate_reply
+    from app.scheduler.worker import DemoModeRequired, simulate_reply
 
-    simulate_reply(lead_id, kind="opt_out" if opt_out else "reply")
+    try:
+        simulate_reply(lead_id, kind="opt_out" if opt_out else "reply")
+    except DemoModeRequired as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     typer.echo(f"recorded={'opt_out' if opt_out else 'reply'} lead_id={lead_id}")
 
 
@@ -323,32 +377,11 @@ def worker(
 
 @app.command()
 def purge(campaign_id: str = typer.Argument(..., help="Campaign data to delete")) -> None:
-    """Delete cache, leads, drafts, and schedule rows for one campaign."""
-    from app.config import get_settings
-    from app.infra.db import connect, init_db
+    """Delete cache, leads, drafts, schedule rows, and checkpoint for one campaign."""
+    from app.infra.purge import purge_campaign
 
-    settings = get_settings()
-    init_db(settings.db_path)
-    conn = connect(settings.db_path)
-    try:
-        lead_ids = [
-            r["id"]
-            for r in conn.execute(
-                "SELECT id FROM leads WHERE campaign_id = ?",
-                (campaign_id,),
-            ).fetchall()
-        ]
-        for lead_id in lead_ids:
-            conn.execute("DELETE FROM scheduled_jobs WHERE lead_id = ?", (lead_id,))
-            conn.execute("DELETE FROM emails WHERE lead_id = ?", (lead_id,))
-            conn.execute("DELETE FROM replies WHERE lead_id = ?", (lead_id,))
-        conn.execute("DELETE FROM leads WHERE campaign_id = ?", (campaign_id,))
-        conn.execute("DELETE FROM budget_ledger WHERE campaign_id = ?", (campaign_id,))
-        conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
-        conn.commit()
-        typer.echo(f"purged campaign_id={campaign_id} leads={len(lead_ids)}")
-    finally:
-        conn.close()
+    result = purge_campaign(campaign_id)
+    typer.echo(f"purged campaign_id={result['campaign_id']} leads={result['leads']}")
 
 
 @app.command("doctor-crustdata")
@@ -376,7 +409,11 @@ def doctor_crustdata(
         raise typer.Exit(code=1)
 
     if chaos:
-        set_chaos(chaos)
+        try:
+            set_chaos(chaos)
+        except Exception as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
 
     init_tracing("doctor-crustdata")
     client = CrustdataClient()

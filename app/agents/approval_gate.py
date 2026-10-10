@@ -58,16 +58,24 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(decision, dict):
         decision = {"approvals": {}}
 
-    approvals = decision.get("approvals") or {}
-    # Convenience: approve_all
+    approvals = dict(decision.get("approvals") or {})
+    guessed_skipped = 0
+
+    # Convenience: approve_all — never auto-allow guessed addresses.
     if decision.get("approve_all"):
-        approvals = {
-            item["contact_id"]: {
-                "approved": True,
-                "allow_guessed": True,
-            }
-            for item in items
-        }
+        include_guessed = bool(decision.get("include_guessed"))
+        for item in items:
+            cid = item["contact_id"]
+            if cid in approvals:
+                continue
+            if item.get("email_confidence") == "guessed":
+                if include_guessed:
+                    approvals[cid] = {"approved": True, "allow_guessed": True}
+                else:
+                    approvals[cid] = {"approved": False}
+                    guessed_skipped += 1
+            else:
+                approvals[cid] = {"approved": True}
 
     extras = dict(state.get("extras") or {})
     extras["email_approvals"] = approvals
@@ -77,6 +85,14 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
         cid = item["contact_id"]
         choice = approvals.get(cid) or {"approved": False}
         approved = bool(choice.get("approved"))
+        if (
+            approved
+            and item.get("email_confidence") == "guessed"
+            and not choice.get("allow_guessed")
+        ):
+            approved = False
+            guessed_skipped += 1
+            approvals[cid] = {**choice, "approved": False}
         lead_id = item["lead_id"]
         if approved:
             seq = list(updated_drafts.get(cid) or [])
@@ -113,6 +129,9 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
                 details={"contact_id": cid},
             )
             events.append({"type": "approval.rejected", "contact_id": cid, "lead_id": lead_id})
+
+    if guessed_skipped:
+        events.append({"type": "policy.guessed_skipped", "count": guessed_skipped})
 
     plan = dict(state.get("plan") or {})
     plan["phase"] = "after_approval"

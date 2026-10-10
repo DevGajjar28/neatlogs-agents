@@ -1,0 +1,177 @@
+{
+  "campaign_id": "b0-kill-prod",
+  "seller": "PostHog",
+  "n": 5,
+  "data_mode": "replay",
+  "credits_spent": 0.0,
+  "credits_by_step": {
+    "buyer.autocomplete": 0.0,
+    "buyer.customers_enrich": 0.0,
+    "buyer.customers_identify": 0.0,
+    "product.customers_identify": 0.0,
+    "product.enrich": 0.0,
+    "product.identify": 0.0
+  },
+  "cache_hit_rate": 1.0,
+  "cache_hits": 13,
+  "cache_total": 13,
+  "tokens": null,
+  "llm_cost": null,
+  "tokens_note": "unavailable locally; read neatlogs dashboard for the campaign",
+  "wall_clock_seconds": 0.0,
+  "companies_found": 0,
+  "companies_kept": 0,
+  "companies_dropped": 0,
+  "contacts_found": 0,
+  "contacts_by_fallback_step": {},
+  "verifier_pass": 0,
+  "verifier_redraft": 0,
+  "verifier_downgrade": 0,
+  "verifier_drop": 0,
+  "emails_sent": 0,
+  "followups_sent": 0,
+  "followups_cancelled": 0,
+  "recoveries_by_type": {},
+  "cost_per_qualified_lead": null,
+  "qualified_leads": 0,
+  "errors": 9,
+  "events": 13,
+  "halt_reason": null,
+  "reconciled": null,
+  "reconcile_note": "not reconciled (DATA_MODE=replay; usage/events skipped)",
+  "events_sample": [
+    {
+      "type": "plan.start",
+      "n": 5,
+      "estimated_credits": 60.0,
+      "max_credits": 400
+    },
+    {
+      "type": "product.customers_identified",
+      "count": 8
+    },
+    {
+      "type": "chaos.kill_after",
+      "after_node": "product_researcher"
+    },
+    {
+      "type": "buyer.icp_proposed",
+      "industries": [
+        "Sporting Goods Manufacturing",
+        "Advertising Services",
+        "IT Services and IT Consulting"
+      ],
+      "countries": [
+        "Italy",
+        "USA"
+      ],
+      "employee_count_ranges": [
+        "1001-5000",
+        "51-200",
+        "201-500"
+      ],
+      "low_confidence_icp": false,
+      "customer_profiles": 8
+    },
+    {
+      "type": "icp.approved",
+      "edited_by_user": true,
+      "industries": [
+        "Sporting Goods Manufacturing",
+        "Advertising Services",
+        "IT Services and IT Consulting"
+      ],
+      "countries": [
+        "Italy",
+        "USA"
+      ]
+    },
+    {
+      "type": "buyer.kept",
+      "count": 0,
+      "pool": 0,
+      "buffer": 0,
+      "n": 5
+    },
+    {
+      "type": "replan.widen_icp",
+      "widening": 1,
+      "kept": 0,
+      "n": 5,
+      "industries": [
+        "Sporting Goods Manufacturing",
+        "Advertising Services",
+        "IT Services and IT Consulting"
+      ],
+      "employee_count_ranges": [
+        "1001-5000",
+        "51-200",
+        "201-500",
+        "501-1000",
+        "5001-10000",
+        "11-50"
+      ],
+      "countries": [
+        "Italy",
+        "USA"
+      ],
+      "reason": "kept 0 < N=5"
+    },
+    {
+      "type": "buyer.kept",
+      "count": 0,
+      "pool": 0,
+      "buffer": 0,
+      "n": 5
+    },
+    {
+      "type": "replan.widen_icp",
+      "widening": 2,
+      "kept": 0,
+      "n": 5,
+      "industries": [
+        "Sporting Goods Manufacturing",
+        "Advertising Services",
+        "IT Services and IT Consulting",
+        "Software Development",
+        "Technology, Information and Internet",
+        "Information Technology and Services"
+      ],
+      "employee_count_ranges": [
+        "1001-5000",
+        "51-200",
+        "201-500",
+        "501-1000",
+        "5001-10000",
+        "11-50"
+      ],
+      "countries": [
+        "Italy",
+        "USA",
+        "United States"
+      ],
+      "reason": "kept 0 < N=5"
+    },
+    {
+      "type": "buyer.kept",
+      "count": 0,
+      "pool": 0,
+      "buffer": 0,
+      "n": 5
+    },
+    {
+      "type": "plan.search_thin",
+      "kept": 0,
+      "n": 5,
+      "widenings": 2,
+      "action": "continue_with_available"
+    },
+    {
+      "type": "chaos.kill_after",
+      "after_node": "account_enrich"
+    },
+    {
+      "type": "approval.empty_queue"
+    }
+  ]
+}
