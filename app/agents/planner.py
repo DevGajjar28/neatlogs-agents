@@ -1,1 +1,239 @@
-"""Main planner node: budgets credits and decides the next step."""
+"""Main planner: budgets credits and routes between stages (deterministic)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from app.config import get_settings
+from app.models import ICPProposal
+
+# Adjacent size bands used when widening a thin ICP search.
+_RANGE_NEIGHBORS: dict[str, list[str]] = {
+    "1-10": ["11-50"],
+    "11-50": ["1-10", "51-200"],
+    "51-200": ["11-50", "201-500"],
+    "201-500": ["51-200", "501-1000"],
+    "501-1000": ["201-500", "1001-5000"],
+    "1001-5000": ["501-1000", "5001-10000"],
+    "5001-10000": ["1001-5000", "10001+"],
+    "10001+": ["5001-10000"],
+}
+
+
+def estimate_credits(n: int) -> float:
+    """Rough credit estimate for an N-lead campaign (05 / 08 ballpark)."""
+    # identify/autocomplete free; enrich customers ~6; search ~few; enrich N*2; person enrich ~N
+    return float(20 + n * 8)
+
+
+def planner_node(state: dict[str, Any]) -> dict[str, Any]:
+    """Decide next node; emit plan / replan / halt events."""
+    events = list(state.get("events") or [])
+    plan = dict(state.get("plan") or {})
+    input_data = dict(state.get("input") or {})
+    n = int(input_data.get("n") or 10)
+    settings = get_settings()
+    max_credits = int(settings.max_credits)
+    spent = float((state.get("budget") or {}).get("credits_spent") or 0)
+    updates: dict[str, Any] = {}
+
+    if not plan.get("initialized"):
+        estimate = estimate_credits(n)
+        plan.update(
+            {
+                "initialized": True,
+                "version": "v0.4",
+                "widenings": 0,
+                "max_widenings": 2,
+                "estimated_credits": estimate,
+                "max_credits": max_credits,
+                "phase": "init",
+                "steps": [
+                    "product_researcher",
+                    "buyer_propose_icp",
+                    "icp_gate",
+                    "buyer_search",
+                    "account_researcher",
+                    "email_writer",
+                ],
+                "rationale": f"Plan for N={n}: product → ICP gate → search → account → email",
+            }
+        )
+        if estimate > max_credits:
+            reduced = max(1, int(n * max_credits / max(estimate, 1)))
+            events.append(
+                {
+                    "type": "plan.reduce_n",
+                    "from_n": n,
+                    "to_n": reduced,
+                    "estimated_credits": estimate,
+                    "max_credits": max_credits,
+                }
+            )
+            n = reduced
+            input_data["n"] = reduced
+            updates["input"] = input_data
+            plan["rationale"] = f"Reduced N to {reduced} so estimate fits MAX_CREDITS={max_credits}"
+        events.append(
+            {
+                "type": "plan.start",
+                "n": n,
+                "estimated_credits": plan["estimated_credits"],
+                "max_credits": max_credits,
+            }
+        )
+        plan["phase"] = "need_product"
+        plan["next"] = "product_researcher"
+        updates["plan"] = plan
+        updates["events"] = events
+        return updates
+
+    if state.get("halt_reason"):
+        plan["next"] = "done"
+        updates["plan"] = plan
+        updates["events"] = events
+        return updates
+
+    phase = plan.get("phase") or "init"
+
+    # Budget gate: stop new enrichment at 90%; finish already-kept companies if search done.
+    if spent >= 0.9 * max_credits and phase not in ("after_account", "after_email", "done"):
+        if phase == "after_search" and state.get("companies"):
+            events.append(
+                {
+                    "type": "halt.budget",
+                    "spent": spent,
+                    "max_credits": max_credits,
+                    "action": "finish_paid_leads",
+                }
+            )
+            plan["next"] = "account_researcher"
+            updates["plan"] = plan
+            updates["events"] = events
+            return updates
+        events.append(
+            {
+                "type": "halt.budget_exhausted",
+                "spent": spent,
+                "max_credits": max_credits,
+            }
+        )
+        plan["next"] = "done"
+        updates["plan"] = plan
+        updates["events"] = events
+        updates["halt_reason"] = "budget_exhausted"
+        return updates
+
+    if phase == "need_product" or (phase == "init" and not state.get("seller")):
+        plan["next"] = "product_researcher"
+    elif phase == "after_product":
+        plan["next"] = "buyer_propose_icp"
+        plan["phase"] = "need_icp"
+    elif phase == "after_icp_proposed":
+        plan["next"] = "icp_gate"
+    elif phase == "after_icp_approved":
+        plan["next"] = "buyer_search"
+        plan["phase"] = "searching"
+    elif phase == "after_search":
+        kept = [c for c in (state.get("companies") or []) if c.get("status") == "kept"]
+        widenings = int(plan.get("widenings") or 0)
+        max_widenings = int(plan.get("max_widenings") or 2)
+        if len(kept) < n and widenings < max_widenings:
+            widenings += 1
+            plan["widenings"] = widenings
+            icp = ICPProposal.model_validate(state["icp"])
+            widened = widen_icp(icp, widenings)
+            events.append(
+                {
+                    "type": "replan.widen_icp",
+                    "widening": widenings,
+                    "kept": len(kept),
+                    "n": n,
+                    "industries": widened.industries,
+                    "employee_count_ranges": widened.employee_count_ranges,
+                    "countries": widened.countries,
+                    "reason": f"kept {len(kept)} < N={n}",
+                }
+            )
+            plan["phase"] = "after_icp_approved"
+            plan["next"] = "buyer_search"
+            updates["icp"] = widened.model_dump(mode="json")
+            updates["companies"] = []
+        else:
+            if len(kept) < n:
+                events.append(
+                    {
+                        "type": "plan.search_thin",
+                        "kept": len(kept),
+                        "n": n,
+                        "widenings": widenings,
+                        "action": "continue_with_available",
+                    }
+                )
+            plan["next"] = "account_researcher"
+    elif phase == "after_account":
+        plan["next"] = "email_writer"
+    elif phase == "after_email":
+        plan["next"] = "done"
+        plan["phase"] = "done"
+    else:
+        # Recover from unexpected phase using available state.
+        if not state.get("seller"):
+            plan["next"] = "product_researcher"
+            plan["phase"] = "need_product"
+        elif not state.get("icp"):
+            plan["next"] = "buyer_propose_icp"
+        elif not (state.get("icp") or {}).get("approved"):
+            plan["next"] = "icp_gate"
+        elif not state.get("companies"):
+            plan["next"] = "buyer_search"
+        elif not state.get("contacts") and not state.get("accounts"):
+            plan["next"] = "account_researcher"
+        elif not state.get("drafts"):
+            plan["next"] = "email_writer"
+        else:
+            plan["next"] = "done"
+
+    updates["plan"] = plan
+    updates["events"] = events
+    return updates
+
+
+def route_after_planner(state: dict[str, Any]) -> str:
+    nxt = (state.get("plan") or {}).get("next") or "done"
+    if nxt == "done":
+        return "done"
+    return str(nxt)
+
+
+def set_plan_phase(state: dict[str, Any], phase: str) -> dict[str, Any]:
+    """Return an updated plan dict with the worker-completed phase."""
+    plan = dict(state.get("plan") or {})
+    plan["phase"] = phase
+    return plan
+
+
+def widen_icp(icp: ICPProposal, widening: int) -> ICPProposal:
+    """Widen ICP one step: expand size bands, then industries."""
+    data = icp.model_copy(deep=True)
+    ranges = list(data.employee_count_ranges or [])
+    if widening == 1:
+        expanded: list[str] = list(ranges)
+        for band in ranges:
+            for neighbor in _RANGE_NEIGHBORS.get(band, []):
+                if neighbor not in expanded:
+                    expanded.append(neighbor)
+        if not expanded:
+            expanded = ["51-200", "201-500", "501-1000"]
+        data.employee_count_ranges = expanded
+        data.rationale = (data.rationale or "") + f" [widen#{widening}: expanded size bands]"
+    else:
+        industries = list(data.industries or [])
+        for extra in ("Software Development", "Technology, Information and Internet", "Information Technology and Services"):
+            if extra not in industries:
+                industries.append(extra)
+        data.industries = industries
+        if "United States" not in data.countries:
+            data.countries = list(data.countries) + ["United States"]
+        data.rationale = (data.rationale or "") + f" [widen#{widening}: broader industries]"
+    return data

@@ -26,7 +26,14 @@ After `.env` is filled, `python cli.py ping-llm` sends one short Bedrock call th
 
 ## Commands
 
-`run`, `resume`, `approve`, `report`, `simulate-reply`, and `purge` are reserved. The campaign graph is not built yet.
+```bash
+python cli.py run --n 10
+python cli.py approve <campaign_id> --yes
+python cli.py serve-ui
+python cli.py run --narrow-icp   # force planner replan.widen_icp
+```
+
+`run` stops at the ICP human gate; `approve` resumes. UI: `http://127.0.0.1:8080/campaigns/<id>/icp`.
 
 ## Team
 

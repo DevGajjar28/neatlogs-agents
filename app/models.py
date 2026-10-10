@@ -38,6 +38,7 @@ class ICPProposal(BaseModel):
     headcount_min: int | None
     headcount_max: int | None
     countries: list[str]
+    employee_count_ranges: list[str] = []
     funding_stages: list[str] = []
     roles: list[BuyerRole]
     rationale: str

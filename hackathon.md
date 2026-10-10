@@ -51,6 +51,13 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: prior Phase 1–3 commits have no session transcripts (expected). Graph not installed yet.
 - Evidence: https://entire.io/gh/DevGajjar28/neatlogs-agents/commit/fbc6a690a2013e1288666f3a5e75a8e1c9261aa9 (checkpoint ID: `01M4K32PNHG5B8VRZ6Z7Q2NKVK`)
 
+### 2026-10-10 20:10 IST
+- Completed: Phase 4 planner + ICP human gate. Graph is `planner` between stages; `buyer_propose_icp` → `icp_gate` (`interrupt`) → `buyer_search`; CLI `approve --yes` and FastAPI `/campaigns/{id}/icp` resume with `Command(resume=...)`. `--narrow-icp` forced thin filters; resume emitted `replan.widen_icp` twice (campaign `p4-gate-replay1`, replay).
+- Planned: Phase 5 account researcher fallback chain + Send fan-out.
+- Tests run: `pytest tests/test_planner.py tests/test_crustdata.py` (11 passed); CLI run→interrupt→approve on replay.
+- Failures remaining: narrow-ICP replay search returned 0 companies (cache miss on exotic filters); full contact yield still limited by v0 account path.
+- Evidence: neatlogs workflow `outbound-v0` / `outbound-approve`; events include `plan.start`, `icp.approved`, `replan.widen_icp`.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

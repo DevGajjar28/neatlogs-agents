@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ICP approval — {{ campaign_id }}</title>
+  <style>
+    :root { color-scheme: light; --ink: #1a1f16; --muted: #5c6554; --line: #d5dccb; --bg: #f3f6ee; --accent: #2f6f4e; }
+    body { font-family: "Segoe UI", sans-serif; margin: 0; background: linear-gradient(160deg, #eef3e6, #f7faf3 40%, #e7eee3); color: var(--ink); }
+    main { max-width: 880px; margin: 2rem auto; padding: 0 1.25rem 3rem; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+    .muted { color: var(--muted); }
+    section { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+    ul { padding-left: 1.2rem; }
+    label { display: block; margin: 0.75rem 0 0.25rem; font-weight: 600; }
+    input { width: 100%; padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+    button { margin-top: 1rem; background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 0.65rem 1.1rem; font-weight: 600; cursor: pointer; }
+    pre { background: #fff; border: 1px solid var(--line); padding: 0.75rem; overflow: auto; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ICP approval</h1>
+    <p class="muted">Campaign <strong>{{ campaign_id }}</strong>
+      {% if waiting %}— waiting for human gate 1{% elif request.query_params.get('done') %}— resumed{% endif %}
+    </p>
+
+    <section>
+      <h2>Proposed ICP</h2>
+      <p><strong>Industries:</strong> {{ icp.get('industries', []) | join(', ') }}</p>
+      <p><strong>Countries:</strong> {{ icp.get('countries', []) | join(', ') }}</p>
+      <p><strong>Size bands:</strong> {{ icp.get('employee_count_ranges', []) | join(', ') }}</p>
+      <p><strong>Rationale:</strong> {{ icp.get('rationale', '') }}</p>
+    </section>
+
+    <section>
+      <h2>Buyer roles</h2>
+      <ul>
+        {% for role in roles %}
+        <li><strong>{{ role.get('kind') }}</strong>: {{ (role.get('title_variants') or []) | join(', ') }} — {{ role.get('why') }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section>
+      <h2>Customer evidence</h2>
+      <ul>
+        {% for ev in evidence %}
+        <li>{{ ev.get('fact') }} <span class="muted">({{ ev.get('source_ref') }})</span></li>
+        {% else %}
+        <li class="muted">No evidence cards on the ICP.</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    {% if waiting %}
+    <section>
+      <h2>Approve / edit</h2>
+      <form method="post" action="/campaigns/{{ campaign_id }}/icp/approve">
+        <label for="industries">Industries (comma-separated)</label>
+        <input id="industries" name="industries" value="{{ icp.get('industries', []) | join(', ') }}" />
+        <label for="countries">Countries (comma-separated)</label>
+        <input id="countries" name="countries" value="{{ icp.get('countries', []) | join(', ') }}" />
+        <label for="employee_count_ranges">Employee count ranges (comma-separated)</label>
+        <input id="employee_count_ranges" name="employee_count_ranges" value="{{ icp.get('employee_count_ranges', []) | join(', ') }}" />
+        <button type="submit">Approve ICP and continue</button>
+      </form>
+    </section>
+    {% endif %}
+
+    <section>
+      <h2>Raw ICP</h2>
+      <pre>{{ icp_json }}</pre>
+    </section>
+  </main>
+</body>
+</html>
