@@ -58,6 +58,13 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: narrow-ICP replay search returned 0 companies (cache miss on exotic filters); full contact yield still limited by v0 account path.
 - Evidence: neatlogs workflow `outbound-v0` / `outbound-approve`; events include `plan.start`, `icp.approved`, `replan.widen_icp`.
 
+### 2026-10-10 20:25 IST
+- Completed: Phase 5 account researcher fallback chain. Batched `company/enrich` → LangGraph `Send` fan-out per company → join with batched `person/enrich`. Contact chain: enrich people → person search → `explain:true` → semantic retry → skip live if disabled → email pattern + MX. `--chaos empty_people` strips enrich people. Planner `plan.replace_no_contact` promotes overfetch buffer.
+- Planned: Phase 6 writer + verifier.
+- Tests run: `pytest tests/test_account_fallback.py tests/test_planner.py tests/test_crustdata.py` — 14 passed (all mocked; **0 live Crustdata calls**).
+- Failures remaining: live people search wrapper still skipped (endpoint disabled on plan). Full live campaign not re-run to save credits.
+- Evidence: unit events `chaos.empty_people`, `recovery.explain_retry`, `fallback.contact_step_2`, `plan.replace_no_contact`.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import get_settings
-from app.models import ICPProposal
+from app.models import Company, ICPProposal
 
 # Adjacent size bands used when widening a thin ICP search.
 _RANGE_NEIGHBORS: dict[str, list[str]] = {
@@ -172,7 +172,39 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
                 )
             plan["next"] = "account_researcher"
     elif phase == "after_account":
-        plan["next"] = "email_writer"
+        # Drop/replace: promote overfetch buffer into kept slots left empty by no_contact.
+        companies = [Company.model_validate(c) for c in (state.get("companies") or [])]
+        kept = [c for c in companies if c.status == "kept"]
+        buffer = [
+            c
+            for c in companies
+            if c.status == "dropped" and c.drop_reason == "below_top_n"
+        ]
+        promoted: list[Company] = []
+        while len(kept) + len(promoted) < n and buffer:
+            nxt = buffer.pop(0)
+            nxt.status = "kept"
+            nxt.drop_reason = None
+            promoted.append(nxt)
+        if promoted:
+            events.append(
+                {
+                    "type": "plan.replace_no_contact",
+                    "promoted": len(promoted),
+                    "company_ids": [c.id for c in promoted],
+                    "kept_before": len(kept),
+                    "n": n,
+                }
+            )
+            # Rewrite company list with promotions applied.
+            by_id = {c.id: c for c in companies}
+            for company in promoted:
+                by_id[company.id] = company
+            updates["companies"] = [c.model_dump(mode="json") for c in by_id.values()]
+            plan["next"] = "account_researcher"
+            plan["phase"] = "need_account_retry"
+        else:
+            plan["next"] = "email_writer"
     elif phase == "after_email":
         plan["next"] = "done"
         plan["phase"] = "done"

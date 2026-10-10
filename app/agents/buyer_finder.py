@@ -259,7 +259,7 @@ def buyer_search_node(state: dict[str, Any]) -> dict[str, Any]:
 
     companies = sorted(companies, key=lambda c: c.fit_score, reverse=True)
     kept: list[Company] = []
-    all_rows: list[Company] = []
+    buffer: list[Company] = []
     for idx, company in enumerate(companies):
         if idx < n:
             company.status = "kept"
@@ -267,22 +267,23 @@ def buyer_search_node(state: dict[str, Any]) -> dict[str, Any]:
         else:
             company.status = "dropped"
             company.drop_reason = "below_top_n"
-        all_rows.append(company)
+            buffer.append(company)
 
+    # Keep overfetch buffer (up to 2xN extra) so planner can replace no_contact drops.
+    pool = kept + buffer[: max(n * 2, n)]
     events.append(
         {
             "type": "buyer.kept",
             "count": len(kept),
-            "pool": len(all_rows),
+            "pool": len(pool),
+            "buffer": len(buffer[: max(n * 2, n)]),
             "n": n,
         }
     )
     spent = client.ledger.spent(campaign_id)
     client.close()
     return {
-        "companies": [c.model_dump(mode="json") for c in all_rows if c.status == "kept"]
-        + [c.model_dump(mode="json") for c in all_rows if c.status != "kept"][: max(0, n)],
-        # Persist kept + a small buffer of dropped candidates for planner drops later.
+        "companies": [c.model_dump(mode="json") for c in pool],
         "events": events,
         "errors": errors,
         "budget": {"credits_spent": spent},

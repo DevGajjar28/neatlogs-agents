@@ -1,6 +1,9 @@
 """LangGraph campaign state."""
 
-from typing import Any, TypedDict
+from __future__ import annotations
+
+import operator
+from typing import Annotated, Any, TypedDict
 
 
 class CampaignState(TypedDict, total=False):
@@ -18,5 +21,6 @@ class CampaignState(TypedDict, total=False):
     events: list
     errors: list
     halt_reason: str | None
-    # Allow forward-compatible keys without breaking the graph.
     extras: Any
+    # Fan-out shards from account_company Send nodes (Phase 5).
+    account_shards: Annotated[list, operator.add]
