@@ -59,12 +59,19 @@ def purge(campaign_id: str = typer.Argument(..., help="Campaign data to delete")
     _pending("purge")
 
 
-@app.command("ping-llm")
-def ping_llm() -> None:
-    """Send one traced Bedrock call. Use after .env is filled."""
-    from app.infra.tracing import finish
+@app.command("doctor-crustdata")
+def doctor_crustdata() -> None:
+    """Print enabled Crustdata endpoints, prices, and balance. Phase 2."""
+    _pending("doctor-crustdata")
+
+
+@app.command("llm-smoke")
+def llm_smoke() -> None:
+    """Send one tiny Bedrock call through app/llm.py, then flush neatlogs."""
+    from app.infra.tracing import finish, init_tracing
     from app.llm import get_llm
 
+    init_tracing("llm-smoke")
     try:
         model = get_llm("fast")
         result = model.invoke("Reply with the single word ok.")

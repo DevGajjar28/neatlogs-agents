@@ -1,0 +1,3 @@
+# SignalSDR
+
+Outbound agent for neatHack 2026. Hard rules live in `01_HACKATHON_RULES.md` and `05_RELIABILITY_SECURITY.md` at the repo root (local only; not committed). Design: `02_ARCHITECTURE.md` and `03_AGENTS_SPEC.md`. Crustdata: `08_CRUSTDATA_API.md`.

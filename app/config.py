@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
 
     neatlogs_api_key: str = ""
+    neatlogs_endpoint: str = "https://ingest.neatlogs.com"
     crustdata_api_key: str = ""
     crustdata_api_version: str = "2025-11-01"
     crustdata_base_url: str = "https://api.crustdata.com"
@@ -21,6 +22,8 @@ class Settings(BaseSettings):
     llm_provider: Literal["bedrock"] = "bedrock"
     aws_profile: str = ""
     aws_region: str = ""
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
     llm_model_strong: str = ""
     llm_model_fast: str = ""
 
@@ -38,3 +41,7 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def clear_settings_cache() -> None:
+    get_settings.cache_clear()

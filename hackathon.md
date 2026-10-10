@@ -11,17 +11,24 @@ LangGraph, AWS Bedrock (ChatBedrockConverse), neatlogs, Entire, cfo.ai, Crustdat
 
 ## Build log
 ### 2026-10-10 16:30 IST
-- Completed: repo connected to github.com/DevGajjar28/neatlogs-agents. Skeleton for config, models, SQLite schema, neatlogs callback factory, Bedrock factory, and CLI stubs. `.env.example` lists every variable the app reads.
-- Planned: Crustdata client, cache, and budget. Test seller for later live runs: PostHog (https://posthog.com), overridable on the CLI.
-- Tests run: `pytest` — 1 passed (`tests/test_db.py`). `python cli.py --help` lists the commands. Bedrock ping not run; `.env` is not filled yet.
-- Failures remaining: Entire CLI is not installed, so this commit has no Entire checkpoint. neatlogs doctor and the Bedrock ping wait on `.env`.
-- Evidence: none yet (no trace).
+- Completed: repo connected to github.com/DevGajjar28/neatlogs-agents. Initial skeleton for config, models, SQLite schema, tracing, and CLI stubs.
+- Planned: Phase 1 acceptance (help, pytest, llm-smoke).
+- Tests run: `pytest` — 1 passed.
+- Failures remaining: Entire CLI not installed; Bedrock smoke pending filled `.env`.
+- Evidence: none yet.
+
+### 2026-10-10 17:15 IST
+- Completed: Phase 1 skeleton alignment. Full folder layout from architecture §3 (empty agent/tool/infra modules). `app/infra/tracing.py` matches tooling setup §2. `get_llm(kind=strong|fast)` always attaches neatlogs callbacks. CLI stubs include `doctor-crustdata` and `llm-smoke`. Model IDs come from `.env` (`LLM_MODEL_STRONG` / `LLM_MODEL_FAST`; Haiku inference profile for smoke).
+- Planned: Phase 2 Crustdata client, cache, budget.
+- Tests run: `python cli.py --help`; `pytest`; `python cli.py llm-smoke`.
+- Failures remaining: Entire CLI still not installed (no checkpoint on this change). Agent graph and Crustdata client not started.
+- Evidence: llm-smoke trace under workflow `llm-smoke` in neatlogs (link after dashboard check).
 
 ## Demo
 Not available yet.
 
 ## Known limitations and next steps
-Agent graph, verifier, and sender are not implemented. Demo mail will use a local SMTP catcher, not Docker.
+Agent graph, verifier, and sender are not implemented. Demo mail will use a local SMTP catcher, not Docker. Crustdata client is Phase 2.
 
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
