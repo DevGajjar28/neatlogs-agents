@@ -15,13 +15,14 @@ from app.infra.chaos import get_chaos
 from app.llm import get_llm
 from app.models import AccountBrief, Company, Contact, ICPProposal
 from app.tools.crustdata import CrustdataClient, CrustdataError
+from app.infra.events import EventBag
 
 
 def account_enrich_node(state: dict[str, Any]) -> dict[str, Any]:
     """One batched company/enrich (≤25) with people + news; stash for fan-out."""
     campaign_id = state["campaign_id"]
     companies = [Company.model_validate(c) for c in (state.get("companies") or [])]
-    events = list(state.get("events") or [])
+    events = EventBag(state, "account_researcher")
     errors = list(state.get("errors") or [])
     client = CrustdataClient()
 
@@ -131,7 +132,7 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
     from app.agents.planner import set_plan_phase
 
     shards = list(state.get("account_shards") or [])
-    events = list(state.get("events") or [])
+    events = EventBag(state, "account_researcher")
     errors = list(state.get("errors") or [])
     accounts: dict[str, Any] = dict(state.get("accounts") or {})
     existing_contacts = [

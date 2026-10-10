@@ -1,7 +1,7 @@
 """LangGraph StateGraph builder for SignalSDR.
 
 Phase 7: approval gate + sender after verifier; account Send fan-out; ICP gate.
-B0: node wrapper for kill_after chaos (exit at start of next node after checkpoint).
+B0/U1: node wrapper for kill_after + campaign_stages.
 """
 
 from __future__ import annotations
@@ -29,7 +29,23 @@ from app.agents.sender import sender_node
 from app.agents.verifier import route_after_verifier, verifier_node
 from app.config import get_settings
 from app.infra.chaos import arm_kill_after, get_chaos, kill_armed
+from app.infra.events import emit, set_stage
 from app.state import CampaignState
+
+NODE_STAGE: dict[str, str] = {
+    "planner": "plan",
+    "product_researcher": "product",
+    "buyer_propose_icp": "buyers",
+    "buyer_search": "buyers",
+    "icp_gate": "icp",
+    "account_enrich": "accounts",
+    "account_company": "accounts",
+    "account_join": "accounts",
+    "email_writer": "emails",
+    "verifier": "verify",
+    "approval_gate": "approval",
+    "sender": "send",
+}
 
 
 def _product_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -40,8 +56,27 @@ def _product_node(state: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _count_label(name: str, state: dict[str, Any], result: dict[str, Any]) -> str | None:
+    merged = {**state, **result}
+    if name in {"buyer_search", "buyer_propose_icp"}:
+        kept = [c for c in (merged.get("companies") or []) if c.get("status") == "kept"]
+        return f"{len(kept)} kept"
+    if name.startswith("account"):
+        return f"{len(merged.get('contacts') or [])} contacts"
+    if name == "email_writer":
+        drafts = merged.get("drafts") or {}
+        return f"{len(drafts)} sequences"
+    if name == "verifier":
+        v = merged.get("verifier") or {}
+        passed = sum(1 for x in v.values() if isinstance(x, dict) and x.get("passed"))
+        return f"{passed} passed"
+    if name == "sender":
+        return "sent"
+    return None
+
+
 def wrap_node(name: str, fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
-    """Wrap a node for kill_after: arm after named node returns; exit on next entry."""
+    """Wrap a node for stages + kill_after."""
 
     def _wrapped(state: dict[str, Any]) -> dict[str, Any]:
         if kill_armed():
@@ -53,15 +88,23 @@ def wrap_node(name: str, fn: Callable[..., dict[str, Any]]) -> Callable[..., dic
                 pass
             os._exit(1)
 
+        campaign_id = str(state.get("campaign_id") or "")
+        stage = NODE_STAGE.get(name)
+        if campaign_id and stage:
+            set_stage(campaign_id, stage, "running")
+
         result = fn(state)
         if not isinstance(result, dict):
             result = {}
 
+        if campaign_id and stage and name not in {"icp_gate", "approval_gate"}:
+            set_stage(campaign_id, stage, "done", _count_label(name, state, result))
+
         target = get_chaos().kill_after
         if target and target == name:
             arm_kill_after()
-            events = list(result["events"]) if "events" in result else list(state.get("events") or [])
-            events.append({"type": "chaos.kill_after", "after_node": name})
+            merged_state = {**state, **result}
+            events = emit(merged_state, "chaos.kill_after", name, after_node=name)
             result = {**result, "events": events}
         return result
 
@@ -129,7 +172,9 @@ def build_v0_graph(checkpointer: SqliteSaver | None = None):
 def open_checkpointer(db_path: str | None = None) -> tuple[sqlite3.Connection, SqliteSaver]:
     settings = get_settings()
     path = db_path or settings.db_path
-    conn = sqlite3.connect(path, check_same_thread=False)
+    conn = sqlite3.connect(path, check_same_thread=False, timeout=5.0)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     saver = SqliteSaver(conn)
     saver.setup()
     return conn, saver

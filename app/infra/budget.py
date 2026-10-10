@@ -97,6 +97,40 @@ def estimate(endpoint: str, body: dict | None = None, prices: dict | None = None
     return base
 
 
+def estimate_campaign(n: int, mode: str = "live") -> dict[str, Any]:
+    """Campaign-level estimate {total, by_step[]} from account prices. Replay → 0."""
+    if mode == "replay":
+        return {"total": 0.0, "by_step": []}
+    n = max(1, int(n))
+    prices = load_account_prices()
+    steps = [
+        ("product.identify", "/company/identify", {}),
+        ("product.enrich", "/company/enrich", {"domains": ["example.com"]}),
+        ("buyer.customers_enrich", "/company/enrich", {"names": ["a"] * 6}),
+        ("buyer.search", "/company/search", {"limit": max(n * 3, 20)}),
+        ("account.enrich", "/company/enrich", {"crustdata_company_ids": list(range(n))}),
+        (
+            "account.person_enrich",
+            "/person/enrich",
+            {
+                "professional_network_profile_urls": ["https://x/" + str(i) for i in range(n)],
+                "fields": ["basic_profile", "contact.business_emails"],
+            },
+        ),
+    ]
+    by_step: list[dict[str, Any]] = []
+    total = 0.0
+    for name, endpoint, body in steps:
+        credits = estimate(endpoint, body, prices)
+        by_step.append({"step": name, "endpoint": endpoint, "credits": credits})
+        total += credits
+    # Ballpark cushion matching prior planner.estimate_credits ≈ 20 + 8n when prices missing
+    if total <= 0:
+        total = float(20 + n * 8)
+        by_step = [{"step": "ballpark", "endpoint": "*", "credits": total}]
+    return {"total": float(total), "by_step": by_step}
+
+
 class BudgetLedger:
     def __init__(self, db_path: str | Path | None = None) -> None:
         settings = get_settings()

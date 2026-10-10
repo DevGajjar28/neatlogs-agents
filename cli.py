@@ -73,74 +73,111 @@ def run(
     ),
 ) -> None:
     """Start a campaign (planner + ICP gate + search + account + email)."""
-    import time
     import uuid
     from pathlib import Path
 
     from dotenv import load_dotenv
 
+    from app.campaign_runner import (
+        ensure_campaign_row,
+        execute_campaign,
+        interrupt_from_result,
+    )
     from app.config import clear_settings_cache, get_settings
-    from app.graph import build_graph, initial_state, open_checkpointer
-    from app.infra.chaos import set_chaos
-    from app.infra.tracing import finish, init_tracing
-    from app.persist import persist_v0_run
-    from app.reporter.run_report import write_v0_report
 
-    # Load .env defaults first; process env (DATA_MODE=live etc.) wins.
     load_dotenv(override=False)
     clear_settings_cache()
     settings = get_settings()
-    if chaos:
-        try:
-            set_chaos(chaos)
-        except Exception as exc:
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(code=2) from exc
-
     cid = campaign_id.strip() or f"v0-{uuid.uuid4().hex[:10]}"
-    init_tracing("outbound-v0")
+    options = {"n": n, "mode": settings.data_mode, "chaos": chaos, "narrow_icp": narrow_icp}
+    ensure_campaign_row(
+        cid,
+        company_name=company_name,
+        website=website,
+        description=description,
+        n=n,
+        mode=settings.data_mode,
+        options=options,
+        status="queued",
+    )
     typer.echo(f"DATA_MODE={settings.data_mode}")
-    conn, checkpointer = open_checkpointer()
-    started = time.time()
     try:
-        app_graph = build_graph(checkpointer)
-        state = initial_state(
-            campaign_id=cid,
+        result = execute_campaign(
+            cid,
             company_name=company_name,
             website=website,
             description=description,
             n=n,
             mode=settings.data_mode,
+            chaos=chaos,
             narrow_icp=narrow_icp,
+            kind="start",
+            fresh=True,
         )
-        result = app_graph.invoke(state, config=_run_config(cid))
-        payload = _interrupt_from_result(result)
-        if payload and payload.get("type") == "icp_approval":
-            icp = payload.get("icp") or {}
-            typer.echo(f"campaign_id={cid}")
-            typer.echo("status=awaiting_icp_approval")
-            typer.echo(f"industries={icp.get('industries')}")
-            typer.echo(f"countries={icp.get('countries')}")
-            typer.echo(f"employee_count_ranges={icp.get('employee_count_ranges')}")
-            typer.echo(f"Approve: python cli.py approve {cid} --yes")
-            typer.echo(f"Or UI:   python -m app.ui.app -> http://127.0.0.1:8080/campaigns/{cid}/icp")
-            return
-        if payload and payload.get("type") == "email_approval":
-            items = payload.get("items") or []
-            typer.echo(f"campaign_id={cid}")
-            typer.echo("status=awaiting_email_approval")
-            typer.echo(f"drafts={len(items)}")
-            typer.echo(f"Approve: python cli.py approve {cid} --yes")
-            typer.echo(f"Or UI:   http://127.0.0.1:8080/campaigns/{cid}/emails")
-            persist_v0_run(result)
-            return
+    except Exception as exc:
+        from app.infra.chaos import ChaosConfigError
 
-        persist_v0_run(result)
-        report_path = write_v0_report(result, wall_seconds=time.time() - started)
-        _print_run_summary(cid, result, report_path, Path(settings.db_path))
-    finally:
-        conn.close()
-        finish()
+        if isinstance(exc, ChaosConfigError):
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=2) from exc
+        raise
+    payload = interrupt_from_result(result)
+    if payload and payload.get("type") == "icp_approval":
+        icp = payload.get("icp") or {}
+        typer.echo(f"campaign_id={cid}")
+        typer.echo("status=awaiting_icp_approval")
+        typer.echo(f"industries={icp.get('industries')}")
+        typer.echo(f"countries={icp.get('countries')}")
+        typer.echo(f"employee_count_ranges={icp.get('employee_count_ranges')}")
+        typer.echo(f"Approve: python cli.py approve {cid} --yes")
+        typer.echo(f"Or UI:   python -m app.ui.app -> http://127.0.0.1:8080/campaigns/{cid}/icp")
+        return
+    if payload and payload.get("type") == "email_approval":
+        items = payload.get("items") or []
+        typer.echo(f"campaign_id={cid}")
+        typer.echo("status=awaiting_email_approval")
+        typer.echo(f"drafts={len(items)}")
+        typer.echo(f"Approve: python cli.py approve {cid} --yes")
+        typer.echo(f"Or UI:   http://127.0.0.1:8080/campaigns/{cid}/emails")
+        return
+    from app.reporter.run_report import write_v0_report
+    import time
+
+    report_path = Path("reports") / f"{cid}.md"
+    if not report_path.exists():
+        write_v0_report(result, wall_seconds=0)
+    _print_run_summary(cid, result, report_path, Path(settings.db_path))
+
+
+@app.command("run-campaign")
+def run_campaign(campaign_id: str = typer.Argument(..., help="Campaign id created by the API")) -> None:
+    """Run a queued campaign row (options_json). Used by the API process spawner."""
+    from dotenv import load_dotenv
+
+    from app.campaign_runner import execute_campaign, interrupt_from_result, load_campaign_options
+    from app.config import clear_settings_cache
+
+    load_dotenv(override=False)
+    clear_settings_cache()
+    meta = load_campaign_options(campaign_id)
+    result = execute_campaign(
+        campaign_id,
+        company_name=meta["company_name"],
+        website=meta["website"],
+        description=meta["description"],
+        n=meta["n"],
+        mode=meta["mode"],
+        chaos=meta["chaos"],
+        narrow_icp=meta["narrow_icp"],
+        kind="start",
+        fresh=True,
+    )
+    payload = interrupt_from_result(result)
+    if payload:
+        typer.echo(f"campaign_id={campaign_id}")
+        typer.echo(f"status=awaiting_{payload.get('type')}")
+        return
+    typer.echo(f"campaign_id={campaign_id} status=completed")
 
 
 @app.command()
@@ -154,9 +191,16 @@ def resume(
 
     from dotenv import load_dotenv
 
+    from app.campaign_runner import (
+        begin_run,
+        end_run,
+        interrupt_from_result,
+        interrupt_from_state,
+        update_campaign_status,
+    )
     from app.config import clear_settings_cache, get_settings
     from app.graph import build_graph, open_checkpointer
-    from app.infra.chaos import set_chaos
+    from app.infra.chaos import ChaosConfigError, set_chaos
     from app.infra.tracing import finish, init_tracing
     from app.persist import persist_v0_run
     from app.reporter.run_report import write_v0_report
@@ -167,29 +211,49 @@ def resume(
     if chaos:
         try:
             set_chaos(chaos)
-        except Exception as exc:
+        except ChaosConfigError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=2) from exc
     init_tracing("outbound-resume")
+    run_id = begin_run(campaign_id, "resume")
     conn, checkpointer = open_checkpointer()
     started = time.time()
+    exit_code = 0
     try:
         app_graph = build_graph(checkpointer)
         config = _run_config(campaign_id)
         snap = app_graph.get_state(config)
-        if _interrupt_from_state(snap):
+        if interrupt_from_state(snap):
             typer.echo("Campaign is waiting on a human gate. Use: python cli.py approve <id> --yes")
+            exit_code = 1
             raise typer.Exit(code=1)
+        update_campaign_status(campaign_id, "running")
         result = app_graph.invoke(None, config=config)
-        payload = _interrupt_from_result(result)
+        payload = interrupt_from_result(result)
         if payload and payload.get("type") == "icp_approval":
+            update_campaign_status(campaign_id, "waiting_icp")
             typer.echo(f"campaign_id={campaign_id}")
             typer.echo("status=awaiting_icp_approval")
             return
+        if payload and payload.get("type") == "email_approval":
+            update_campaign_status(campaign_id, "waiting_approval")
+            persist_v0_run(result)
+            typer.echo(f"campaign_id={campaign_id}")
+            typer.echo("status=awaiting_email_approval")
+            return
         persist_v0_run(result)
+        halt = result.get("halt_reason")
+        update_campaign_status(campaign_id, "halted" if halt else "completed")
         report_path = write_v0_report(result, wall_seconds=time.time() - started)
         _print_run_summary(campaign_id, result, report_path, Path(settings.db_path))
+    except typer.Exit:
+        raise
+    except Exception:
+        exit_code = 1
+        update_campaign_status(campaign_id, "failed")
+        raise
     finally:
+        end_run(run_id, exit_code)
         conn.close()
         finish()
 
@@ -204,17 +268,26 @@ def approve(
         help="When approving emails, also approve guessed addresses",
     ),
     chaos: str = typer.Option("", help="Comma-separated chaos flags for the resumed run"),
+    decision_id: int | None = typer.Option(
+        None,
+        "--decision-id",
+        help="Non-interactive: resume from gate_decisions row id (API)",
+    ),
 ) -> None:
     """Approve ICP (gate 1) or email drafts (gate 2) and resume with Command(resume=...)."""
+    import json
     import time
+    from datetime import datetime, timezone
     from pathlib import Path
 
     from dotenv import load_dotenv
     from langgraph.types import Command
 
+    from app.campaign_runner import begin_run, end_run, interrupt_from_result, interrupt_from_state
     from app.config import clear_settings_cache, get_settings
     from app.graph import build_graph, open_checkpointer
-    from app.infra.chaos import set_chaos
+    from app.infra.chaos import ChaosConfigError, set_chaos
+    from app.infra.db import connect, init_db
     from app.infra.tracing import finish, init_tracing
     from app.persist import persist_v0_run
     from app.reporter.run_report import write_v0_report
@@ -225,22 +298,55 @@ def approve(
     if chaos:
         try:
             set_chaos(chaos)
-        except Exception as exc:
+        except ChaosConfigError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=2) from exc
     init_tracing("outbound-approve")
+    run_id = begin_run(campaign_id, "resume")
     conn, checkpointer = open_checkpointer()
     started = time.time()
+    exit_code = 0
     try:
         app_graph = build_graph(checkpointer)
         config = _run_config(campaign_id)
         snap = app_graph.get_state(config)
-        payload = _interrupt_from_state(snap)
+        payload = interrupt_from_state(snap)
         if not payload:
             typer.echo("No approval interrupt found for this campaign", err=True)
+            exit_code = 1
             raise typer.Exit(code=1)
 
-        if payload.get("type") == "icp_approval":
+        if decision_id is not None:
+            init_db(settings.db_path)
+            db = connect(settings.db_path)
+            try:
+                row = db.execute(
+                    "SELECT * FROM gate_decisions WHERE id = ? AND campaign_id = ?",
+                    (decision_id, campaign_id),
+                ).fetchone()
+                if not row:
+                    typer.echo(f"gate_decisions id={decision_id} not found", err=True)
+                    exit_code = 1
+                    raise typer.Exit(code=1)
+                if row["status"] != "pending":
+                    typer.echo(f"gate_decisions id={decision_id} already {row['status']}", err=True)
+                    exit_code = 1
+                    raise typer.Exit(code=1)
+                resume_payload = json.loads(row["decision_json"])
+                result = app_graph.invoke(Command(resume=resume_payload), config=config)
+                db.execute(
+                    """
+                    UPDATE gate_decisions
+                    SET status = 'consumed', consumed_at = ?
+                    WHERE id = ?
+                    """,
+                    (datetime.now(timezone.utc).isoformat(), decision_id),
+                )
+                db.commit()
+            finally:
+                db.close()
+            typer.echo(f"campaign_id={campaign_id} decision_id={decision_id} resumed")
+        elif payload.get("type") == "icp_approval":
             icp = dict(payload.get("icp") or {})
             typer.echo(f"industries={icp.get('industries')}")
             typer.echo(f"countries={icp.get('countries')}")
@@ -290,23 +396,72 @@ def approve(
             )
         else:
             typer.echo(f"Unknown interrupt type: {payload.get('type')}", err=True)
+            exit_code = 1
             raise typer.Exit(code=1)
 
-        payload2 = _interrupt_from_result(result)
-        if payload2 and payload2.get("type") in {"icp_approval", "email_approval"}:
+        payload2 = interrupt_from_result(result)
+        if payload2 and payload2.get("type") == "icp_approval":
+            from app.campaign_runner import update_campaign_status
+
+            update_campaign_status(campaign_id, "waiting_icp")
             typer.echo(f"Still awaiting approval: {payload2.get('type')}")
+            return
+        if payload2 and payload2.get("type") == "email_approval":
+            from app.campaign_runner import update_campaign_status
+
+            update_campaign_status(campaign_id, "waiting_approval")
             persist_v0_run(result)
+            typer.echo(f"Still awaiting approval: {payload2.get('type')}")
             return
         persist_v0_run(result)
-        report_path = write_v0_report(result, wall_seconds=time.time() - started)
-        _print_run_summary(campaign_id, result, report_path, Path(settings.db_path))
-        sent = [e for e in (result.get("events") or []) if e.get("type") == "send.step1"]
-        scheduled = [e for e in (result.get("events") or []) if e.get("type") == "send.scheduled"]
-        typer.echo(f"sent_step1={len(sent)} scheduled_followups={len(scheduled)}")
-        typer.echo("Run worker: python cli.py worker --once")
+        halt = result.get("halt_reason")
+        from app.campaign_runner import update_campaign_status
+
+        update_campaign_status(campaign_id, "halted" if halt else "completed")
+        if decision_id is None:
+            report_path = write_v0_report(result, wall_seconds=time.time() - started)
+            _print_run_summary(campaign_id, result, report_path, Path(settings.db_path))
+            sent = [e for e in (result.get("events") or []) if e.get("type") == "send.step1"]
+            scheduled = [e for e in (result.get("events") or []) if e.get("type") == "send.scheduled"]
+            typer.echo(f"sent_step1={len(sent)} scheduled_followups={len(scheduled)}")
+            typer.echo("Run worker: python cli.py worker --once")
+    except typer.Exit:
+        raise
+    except Exception:
+        exit_code = 1
+        from app.campaign_runner import update_campaign_status
+
+        update_campaign_status(campaign_id, "failed")
+        raise
     finally:
+        end_run(run_id, exit_code)
         conn.close()
         finish()
+
+
+@app.command()
+def serve(
+    with_worker: bool = typer.Option(False, "--with-worker", help="Also poll scheduled follow-ups"),
+    port: int = typer.Option(8000, help="API port"),
+) -> None:
+    """Serve the JSON API on 127.0.0.1 (UI later on :3000). Keep serve-ui for :8080 gates."""
+    import threading
+
+    import uvicorn
+
+    if with_worker:
+        from app.scheduler.worker import run_forever
+
+        thread = threading.Thread(
+            target=run_forever,
+            kwargs={"poll_seconds": 20.0},
+            name="followup-worker",
+            daemon=True,
+        )
+        thread.start()
+        typer.echo("worker thread started (poll=20s)")
+    typer.echo(f"API http://127.0.0.1:{port}/api/health")
+    uvicorn.run("app.api.main:app", host="127.0.0.1", port=port, reload=False)
 
 
 @app.command("serve-ui")

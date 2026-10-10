@@ -94,6 +94,22 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: no Mailpit → 0 emails sent; crust_429 retries in client (stdout) without a state event; cfo.ai export is manual; token/$ from neatlogs not filled in the table yet.
 - Evidence: `reports/comparison.md`, `reports/v1-posthog-live1.md`, campaigns `v1-posthog-live1` / `p8-chaos-live2` / `p8-kill1`.
 
+### 2026-10-11 00:55 IST
+- Completed: Step U1 (per `DECISIONS.md`; overrides docs/10 where they differ). DB: `events`, `campaign_stages`, `runs`, `gate_decisions`, `settings`, `email_decisions` + campaign cols; WAL + 5s busy timeout. `emit` / `EventBag` + `event_messages` + `set_stage` via graph wrapper. `estimate_campaign` in budget; planner pause. CLI `run-campaign`, `approve --decision-id`, `serve` (:8000); `serve-ui` (:8080) kept. FastAPI reads checkpoints via `state_reader`, spawns CLI children for start/resume/gates; email staging + `send-approved`.
+- Planned: U2+ UI surfaces; Mailpit live send screenshot when a run hits `waiting_approval` with drafts.
+- Tests run: `pytest` — **46 passed** (`tests/test_api_u1.py` with spawn mocked).
+- Acceptance U1: `cli.py serve` → `GET /api/campaigns` + `/campaigns/u1-accept-replay1` real data; CLI `run --campaign-id u1-accept-replay1` wrote events + stages (plan/product/buyers/icp waiting); `POST /api/campaigns/u1-accept-replay1/icp` spawned `approve --decision-id` child and resumed to completed. Email staging + send-approved covered in unit tests (replay run had 0 drafts so no Mailpit send this pass).
+- Failures remaining: replay ICP still often yields 0 companies/drafts after widen; live Mailpit send-approved not re-proven in this U1 smoke.
+- Evidence: campaign `u1-accept-replay1`; logs under `logs/u1-accept-replay1-*.log`; API on `127.0.0.1:8000`.
+
+### 2026-10-11 01:15 IST
+- Completed: Step U2 frontend shell. Next.js 15 App Router in `web/` (TS, Tailwind v4, ESLint, shadcn/ui radix-nova). Tokens from docs/09 §3 in `styles/tokens.css` mapped to Tailwind/shadcn vars; Geist Sans/Mono via `geist`; collapsible sidebar (5 nav + live `GET /system/status` footer), 56px header, ⌘K Command palette (navigation only), common components, `lib/api.ts` + `npm run gen:api` → `lib/api-types.ts`, React Query provider. Placeholder EmptyState pages for campaigns/approvals/outbox/reports/settings.
+- Planned: U3 campaigns list + New campaign drawer.
+- Tests run: `npm run build` OK; `npm run lint` clean (no ESLint issues).
+- Acceptance U2: shell tokens/layout per §3–4; focus-visible accent rings global; sidebar footer shows real Crustdata credits (200) / mode / tracing / Bedrock model from API.
+- Failures remaining: New campaign only opens ⌘K until U3; approvals count badge is "—"; no mock data by design.
+- Evidence: `web/` app; regenerate types with API up: `cd web && npm run gen:api`.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

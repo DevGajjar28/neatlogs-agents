@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from app.llm import get_llm
 from app.models import AccountBrief, BuyerRole, Contact, EmailDraft, ICPProposal, SellerBrief
+from app.infra.events import EventBag
 
 OPT_OUT = "Opt out: reply stop and I will not email again."
 
@@ -15,7 +16,7 @@ def email_writer_node(state: dict[str, Any]) -> dict[str, Any]:
     seller = SellerBrief.model_validate(state["seller"])
     contacts = [Contact.model_validate(c) for c in (state.get("contacts") or [])]
     accounts = state.get("accounts") or {}
-    events = list(state.get("events") or [])
+    events = EventBag(state, "email_writer")
     errors = list(state.get("errors") or [])
     icp = ICPProposal.model_validate(state["icp"]) if state.get("icp") else None
     roles = {r.kind: r for r in (icp.roles if icp else [])}

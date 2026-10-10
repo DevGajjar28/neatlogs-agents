@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.llm import get_llm
 from app.models import AccountBrief, Contact, EmailDraft, EvidenceCard, SellerBrief, VerifierResult
+from app.infra.events import EventBag
 
 BANNED = ("guaranteed", "100%", "no risk", "act now", "limited time", "congratulations")
 INJECTION_HINTS = (
@@ -34,7 +35,7 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
     contacts = {c["id"]: Contact.model_validate(c) for c in (state.get("contacts") or []) if isinstance(c, dict)}
     accounts = state.get("accounts") or {}
     drafts = state.get("drafts") or {}
-    events = list(state.get("events") or [])
+    events = EventBag(state, "verifier")
     errors = list(state.get("errors") or [])
     verifier: dict[str, Any] = dict(state.get("verifier") or {})
     extras = dict(state.get("extras") or {})

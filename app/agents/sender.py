@@ -9,6 +9,7 @@ from typing import Any
 from app.config import get_settings
 from app.infra.db import connect, init_db
 from app.tools.mailer import PolicyDenied, email_id_for, lead_id_for, send
+from app.infra.events import EventBag
 
 
 def sender_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -16,7 +17,7 @@ def sender_node(state: dict[str, Any]) -> dict[str, Any]:
     contacts = {c["id"]: c for c in (state.get("contacts") or []) if isinstance(c, dict)}
     drafts = state.get("drafts") or {}
     approvals = dict((state.get("extras") or {}).get("email_approvals") or {})
-    events = list(state.get("events") or [])
+    events = EventBag(state, "sender")
     errors = list(state.get("errors") or [])
     settings = get_settings()
     init_db(settings.db_path)

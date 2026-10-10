@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import get_settings
+from app.infra.budget import estimate_campaign
+from app.infra.db import connect, init_db
+from app.infra.events import EventBag
 from app.models import Company, ICPProposal
 
 # Adjacent size bands used when widening a thin ICP search.
@@ -21,14 +24,45 @@ _RANGE_NEIGHBORS: dict[str, list[str]] = {
 
 
 def estimate_credits(n: int) -> float:
-    """Rough credit estimate for an N-lead campaign (05 / 08 ballpark)."""
-    # identify/autocomplete free; enrich customers ~6; search ~few; enrich N*2; person enrich ~N
-    return float(20 + n * 8)
+    """Rough credit estimate for an N-lead campaign (delegates to budget.estimate_campaign)."""
+    return float(estimate_campaign(n, mode="live")["total"])
+
+
+def _check_pause(campaign_id: str) -> bool:
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    try:
+        row = conn.execute(
+            "SELECT pause_requested FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        ).fetchone()
+        return bool(row and int(row["pause_requested"] or 0) == 1)
+    finally:
+        conn.close()
+
+
+def _clear_pause(campaign_id: str, stage: str | None) -> None:
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    try:
+        conn.execute(
+            """
+            UPDATE campaigns
+            SET pause_requested = 0, status = 'paused', current_stage = COALESCE(?, current_stage)
+            WHERE id = ?
+            """,
+            (stage, campaign_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     """Decide next node; emit plan / replan / halt events."""
-    events = list(state.get("events") or [])
+    events = EventBag(state, "planner")
     plan = dict(state.get("plan") or {})
     input_data = dict(state.get("input") or {})
     n = int(input_data.get("n") or 10)
@@ -95,6 +129,17 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
         return updates
 
     phase = plan.get("phase") or "init"
+    campaign_id = str(state.get("campaign_id") or "")
+    if campaign_id and _check_pause(campaign_id):
+        stage = str(plan.get("next") or phase or "plan")
+        events.append({"type": "halt.paused", "stage": stage})
+        _clear_pause(campaign_id, stage)
+        plan["next"] = "done"
+        updates["plan"] = plan
+        updates["events"] = events
+        updates["halt_reason"] = "paused"
+        return updates
+
 
     # Budget gate: stop new enrichment at 90%; finish already-kept companies if search done.
     if spent >= 0.9 * max_credits and phase not in ("after_account", "after_email", "done"):

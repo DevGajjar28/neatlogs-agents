@@ -12,6 +12,7 @@ from app.llm import get_llm
 from app.models import SellerBrief
 from app.tools import web
 from app.tools.crustdata import CrustdataClient, CrustdataError
+from app.infra.events import EventBag
 
 
 class _ExtractedSeller(BaseModel):
@@ -33,7 +34,7 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
     company_name = inp["company_name"]
     website = inp["website"]
     description = inp.get("description") or ""
-    events = list(state.get("events") or [])
+    events = EventBag(state, "product_researcher")
     errors = list(state.get("errors") or [])
 
     client = CrustdataClient()

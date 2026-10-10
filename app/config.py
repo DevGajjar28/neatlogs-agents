@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     neatlogs_api_key: str = ""
     neatlogs_endpoint: str = "https://ingest.neatlogs.com"
+    neatlogs_traces_url: str = ""
     crustdata_api_key: str = ""
     crustdata_api_version: str = "2025-11-01"
     crustdata_base_url: str = "https://api.crustdata.com"

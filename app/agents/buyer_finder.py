@@ -13,6 +13,7 @@ from app.agents.planner import set_plan_phase
 from app.llm import get_llm
 from app.models import BuyerRole, Company, ICPProposal, SellerBrief
 from app.tools.crustdata import CrustdataClient, CrustdataError
+from app.infra.events import EventBag
 
 
 class _IcpDraft(BaseModel):
@@ -29,7 +30,7 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
     """Enrich named customers, derive ICP, validate autocomplete. Does not search yet."""
     campaign_id = state["campaign_id"]
     seller = SellerBrief.model_validate(state["seller"])
-    events = list(state.get("events") or [])
+    events = EventBag(state, "buyer_finder")
     errors = list(state.get("errors") or [])
     client = CrustdataClient()
 
@@ -179,8 +180,10 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
 
 def icp_gate_node(state: dict[str, Any]) -> dict[str, Any]:
     """Human gate 1: interrupt with ICP, roles, and customer evidence; resume approves/edits."""
+    from app.infra.events import set_stage
+
     icp_raw = dict(state.get("icp") or {})
-    events = list(state.get("events") or [])
+    events = EventBag(state, "buyer_finder")
     payload = {
         "type": "icp_approval",
         "campaign_id": state.get("campaign_id"),
@@ -189,7 +192,11 @@ def icp_gate_node(state: dict[str, Any]) -> dict[str, Any]:
         "evidence": icp_raw.get("evidence") or [],
         "message": "Approve or edit the ICP before paid company search.",
     }
+    if state.get("campaign_id"):
+        set_stage(str(state["campaign_id"]), "icp", "waiting")
     decision = interrupt(payload)
+    if state.get("campaign_id"):
+        set_stage(str(state["campaign_id"]), "icp", "done")
     if not isinstance(decision, dict):
         decision = {"approved": bool(decision)}
 
@@ -233,7 +240,7 @@ def buyer_search_node(state: dict[str, Any]) -> dict[str, Any]:
     n = int(state["input"].get("n") or 10)
     seller = SellerBrief.model_validate(state["seller"])
     icp = ICPProposal.model_validate(state["icp"])
-    events = list(state.get("events") or [])
+    events = EventBag(state, "buyer_finder")
     errors = list(state.get("errors") or [])
     extras = state.get("extras") or {}
     exclude = list(extras.get("exclude_domains") or [seller.domain])

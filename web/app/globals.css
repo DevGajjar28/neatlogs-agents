@@ -1,0 +1,98 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "../styles/tokens.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-fg);
+  --color-secondary: var(--surface-muted);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--surface-muted);
+  --color-muted-foreground: var(--text-muted);
+  /* shadcn "accent" slot = soft selected bg; brand blue stays --accent */
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--status-danger);
+  --color-border: var(--border);
+  --color-input: var(--border-strong);
+  --color-ring: var(--accent);
+  --color-sidebar: var(--surface);
+  --color-sidebar-foreground: var(--text);
+  --color-sidebar-primary: var(--primary);
+  --color-sidebar-primary-foreground: var(--primary-fg);
+  --color-sidebar-accent: var(--surface-muted);
+  --color-sidebar-accent-foreground: var(--text);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-ring: var(--accent);
+  --color-chart-1: var(--accent);
+  --color-chart-2: var(--status-success);
+  --color-chart-3: var(--status-warning);
+  --color-chart-4: var(--status-danger);
+  --color-chart-5: var(--text-muted);
+  --color-success: var(--status-success);
+  --color-success-soft: var(--status-success-soft);
+  --color-warning: var(--status-warning);
+  --color-warning-soft: var(--status-warning-soft);
+  --color-danger: var(--status-danger);
+  --color-danger-soft: var(--status-danger-soft);
+  --color-info: var(--status-info);
+  --color-info-soft: var(--status-info-soft);
+  --color-neutral: var(--status-neutral);
+  --color-neutral-soft: var(--status-neutral-soft);
+  --color-brand: var(--accent);
+  --color-brand-soft: var(--accent-soft);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-border-strong: var(--border-strong);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-2xl: 8px;
+  --radius-3xl: 8px;
+  --radius-4xl: 8px;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* docs/09 §3 + §7 — visible focus on every interactive control */
+  :focus {
+    outline: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent) !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
+}

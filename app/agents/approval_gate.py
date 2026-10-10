@@ -8,6 +8,7 @@ from langgraph.types import interrupt
 
 from app.infra.audit import write_audit
 from app.tools.mailer import lead_id_for
+from app.infra.events import EventBag
 
 
 def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -16,7 +17,7 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
     contacts = {c["id"]: c for c in (state.get("contacts") or []) if isinstance(c, dict)}
     drafts = state.get("drafts") or {}
     verifier = state.get("verifier") or {}
-    events = list(state.get("events") or [])
+    events = EventBag(state, "approval_gate")
     items = []
 
     for contact_id, sequence in drafts.items():
@@ -54,7 +55,11 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
         "items": items,
         "message": "Approve, edit, or reject verified drafts before send.",
     }
+    from app.infra.events import set_stage
+
+    set_stage(campaign_id, "approval", "waiting")
     decision = interrupt(payload)
+    set_stage(campaign_id, "approval", "done")
     if not isinstance(decision, dict):
         decision = {"approvals": {}}
 
