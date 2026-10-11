@@ -103,6 +103,10 @@ export type SystemStatus = {
     endpoint?: string;
     [k: string]: unknown;
   };
+  max_send_mode?: string;
+  sending_paused?: boolean;
+  mail_account_count?: number;
+  mail_account_error?: boolean;
 };
 
 export function getSystemStatus() {
@@ -145,6 +149,8 @@ export type CampaignDetail = CampaignSummary & {
   links?: Record<string, string | null>;
 };
 
+export type SendMode = "sandbox" | "gmail_drafts" | "gmail_test" | "gmail_live";
+
 export type CreateCampaignInput = {
   company_name: string;
   website: string;
@@ -155,6 +161,192 @@ export type CreateCampaignInput = {
   chaos?: string;
   kill_after?: string;
   baseline_campaign_id?: string | null;
+  mail_account_id?: string | null;
+  send_mode?: SendMode;
+  live_confirm_email?: string | null;
+};
+
+export type MailAccount = {
+  id: string;
+  label: string;
+  provider: string;
+  email: string;
+  display_name: string;
+  username: string;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_security: string;
+  imap_host: string;
+  imap_port: number;
+  status: string;
+  last_verified_at?: string | null;
+  last_error?: string | null;
+  daily_cap: number;
+  per_domain_daily_cap: number;
+  min_gap_seconds: number;
+  test_recipients: string[];
+  live_enabled: boolean;
+  signature: string;
+  postal_address: string;
+  drafts_folder?: string | null;
+  is_default: boolean;
+  has_password: boolean;
+  sent_24h: number;
+  cap: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type MailPreset = {
+  id: string;
+  label: string;
+  provider: string;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_security: string;
+  imap_host: string;
+  imap_port: number;
+};
+
+export type MailPolicies = {
+  sending_paused: boolean;
+  max_send_mode: string;
+  demo_mode: boolean;
+  allow_live_sends: boolean;
+  values: {
+    daily_cap: number;
+    per_domain_daily_cap: number;
+    min_gap_seconds: number;
+    sending_window: Record<string, unknown>;
+    default_test_recipients: string[];
+  };
+  rules: {
+    id: string;
+    name: string;
+    protects: string;
+    editable: boolean;
+    always_on: boolean;
+    value?: unknown;
+    hard_max?: number | null;
+    hard_min?: number | null;
+    blocks_24h: number;
+    event?: string | null;
+  }[];
+};
+
+export type PolicyEvent = {
+  id: number;
+  ts?: string | null;
+  type: string;
+  message: string;
+  campaign_id?: string | null;
+  lead_id?: string | null;
+};
+
+export type OutboxRow = {
+  id: string;
+  lead_id?: string | null;
+  step: number;
+  subject: string;
+  from_label: string;
+  from_email?: string | null;
+  send_mode: string;
+  delivery_status: string;
+  ui_status: string;
+  message_id?: string | null;
+  actual_recipient_masked?: string | null;
+  sent_at?: string | null;
+  scheduled_at?: string | null;
+  open_in_gmail_url?: string | null;
+};
+
+export type ReplyRow = {
+  id: string;
+  lead_id: string;
+  received_at?: string | null;
+  classification?: string | null;
+  snippet?: string | null;
+  from_masked?: string | null;
+  message_id?: string | null;
+  source?: string | null;
+  open_in_gmail_url?: string | null;
+};
+
+export type LeadRow = {
+  lead_id: string;
+  company_name: string;
+  company_domain: string;
+  contact_name?: string | null;
+  contact_title?: string | null;
+  role_kind?: string | null;
+  email_masked?: string | null;
+  email_confidence?: string;
+  fit?: number;
+  verifier?: string;
+  redraft_count?: number;
+  status: string;
+  updated_at?: string | null;
+  contact_id?: string | null;
+  email_1_subject?: string | null;
+  email_1_body?: string | null;
+  followup_1_subject?: string | null;
+  followup_1_body?: string | null;
+  followup_2_subject?: string | null;
+  followup_2_body?: string | null;
+  sent_at?: string | null;
+  email_1_editable?: boolean;
+  followup_1_editable?: boolean;
+  followup_2_editable?: boolean;
+};
+
+export type PipelineAgent = {
+  agent:
+    | "planner"
+    | "product_researcher"
+    | "buyer_finder"
+    | "account_researcher"
+    | "email_writer_verifier"
+    | "sender";
+  label: string;
+  status: "idle" | "running" | "waiting" | "done" | "failed";
+  detail?: string | null;
+  count_label?: string | null;
+  started_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type PipelineOut = { agents: PipelineAgent[] };
+
+export type CampaignEvent = {
+  id: number;
+  ts: string;
+  type: string;
+  agent: string;
+  level: string;
+  message: string;
+  credits_delta?: number;
+  lead_id?: string | null;
+  trace_ref?: string | null;
+};
+
+export type PendingApprovalItem = {
+  contact_id: string;
+  lead_id?: string | null;
+  name?: string | null;
+  title?: string | null;
+  email_masked?: string | null;
+  email_confidence?: string | null;
+  company_name?: string | null;
+  subject?: string | null;
+  body?: string | null;
+  guessed?: boolean;
+};
+
+export type PendingApprovalsOut = {
+  campaign_id: string;
+  type: string;
+  waiting: boolean;
+  items: PendingApprovalItem[];
 };
 
 export type EstimateOut = {
@@ -179,9 +371,154 @@ export function createCampaign(body: CreateCampaignInput) {
       mode: "replay",
       chaos: "",
       kill_after: "",
+      send_mode: "sandbox",
       ...body,
     }),
   });
+}
+
+export function listMailAccounts() {
+  return api<MailAccount[]>("/mail-accounts");
+}
+
+export function listMailPresets() {
+  return api<MailPreset[]>("/mail-accounts/presets");
+}
+
+export function createMailAccount(body: Record<string, unknown>) {
+  return api<MailAccount>("/mail-accounts", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchMailAccount(id: string, body: Record<string, unknown>) {
+  return api<MailAccount>(`/mail-accounts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function verifyMailAccount(id: string) {
+  return api<{ ok: boolean; detail: string; drafts_folder?: string | null }>(
+    `/mail-accounts/${encodeURIComponent(id)}/verify`,
+    { method: "POST" },
+  );
+}
+
+export function testSendMailAccount(id: string) {
+  return api<{ ok: boolean; result?: unknown }>(
+    `/mail-accounts/${encodeURIComponent(id)}/test-send`,
+    { method: "POST" },
+  );
+}
+
+export function disableMailAccount(id: string) {
+  return api<MailAccount>(`/mail-accounts/${encodeURIComponent(id)}/disable`, {
+    method: "POST",
+  });
+}
+
+export function enableMailAccount(id: string) {
+  return api<MailAccount>(`/mail-accounts/${encodeURIComponent(id)}/enable`, {
+    method: "POST",
+  });
+}
+
+export function deleteMailAccount(id: string) {
+  return api<void>(`/mail-accounts/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export function putSendingPaused(sending_paused: boolean) {
+  return api<{ sending_paused: boolean }>("/settings/sending", {
+    method: "PUT",
+    body: JSON.stringify({ sending_paused }),
+  });
+}
+
+export function getMailPolicies() {
+  return api<MailPolicies>("/settings/policies");
+}
+
+export function patchMailPolicies(body: Record<string, unknown>) {
+  return api<MailPolicies>("/settings/policies", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function getPolicyRuleEvents(rule: string) {
+  return api<PolicyEvent[]>(`/settings/policies/${encodeURIComponent(rule)}/events`);
+}
+
+export function listOutbox() {
+  return api<OutboxRow[]>("/outbox");
+}
+
+export function listCampaignReplies(campaignId: string) {
+  return api<ReplyRow[]>(`/campaigns/${encodeURIComponent(campaignId)}/replies`);
+}
+
+export function listCampaignLeads(campaignId: string) {
+  return api<LeadRow[]>(`/campaigns/${encodeURIComponent(campaignId)}/leads`);
+}
+
+export function getCampaignPipeline(campaignId: string) {
+  return api<PipelineOut>(`/campaigns/${encodeURIComponent(campaignId)}/pipeline`);
+}
+
+export function listCampaignEvents(campaignId: string, after = 0) {
+  return api<CampaignEvent[]>(`/campaigns/${encodeURIComponent(campaignId)}/events`, {
+    searchParams: { after, limit: 200 },
+  });
+}
+
+export function getPendingApprovals(campaignId: string) {
+  return api<PendingApprovalsOut>(
+    `/campaigns/${encodeURIComponent(campaignId)}/pending-approvals`,
+  );
+}
+
+export function decideEmail(
+  campaignId: string,
+  contactId: string,
+  body: {
+    action: "approve" | "reject";
+    subject?: string | null;
+    body?: string | null;
+    confirm_guessed?: boolean;
+  },
+) {
+  return api<{ contact_id: string; action: string; issues: string[] }>(
+    `/emails/${encodeURIComponent(contactId)}`,
+    {
+      method: "POST",
+      searchParams: { campaign_id: campaignId },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function sendApproved(campaignId: string) {
+  return api<{ decision_id: number; pid: number; approvals: number }>(
+    `/campaigns/${encodeURIComponent(campaignId)}/send-approved`,
+    { method: "POST" },
+  );
+}
+
+export function patchLeadSequence(
+  leadId: string,
+  steps: { step: 1 | 2 | 3; subject?: string; body?: string }[],
+) {
+  return api<{ lead_id: string; contact_id: string; steps: number[] }>(
+    `/leads/${encodeURIComponent(leadId)}/sequence`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ steps }),
+    },
+  );
 }
 
 export function estimateCampaign(n: number, mode: "replay" | "live") {

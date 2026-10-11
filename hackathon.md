@@ -115,6 +115,21 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Tests run: `npm run build` + `npm run lint` clean; API `/campaigns` + `/estimate` smoke OK.
 - Failures remaining: full ICP/email gates in UI still U4/U5; run page is a thin status/stages view.
 
+### 2026-10-11 19:45 IST
+- Completed: Gmail SMTP/IMAP integration per docs/11 under docs/12 guardrails. DB: `mail_accounts`, `mail_send_log`, email/reply columns, settings for `sending_paused` + `mail_policy` + IMAP UID state. Package `app/mail/*` (crypto, accounts, policy, compose, transports, verify, inbox, classify). `mailer.send()` sole send gate (policy → compose → transport); worker uses real prospect email + IMAP poll; CLI `gen-key`, `mail pause-all` / `resume-all`. API: mail-accounts CRUD/verify/test-send, settings sending/policies, outbox, campaign replies + send_mode fields, system status mail chips. UI: Settings mail accounts + Sending + Policies; New campaign Send from/mode; Outbox table; lead Reply drawer; sidebar max-mode + paused chips. `npm run gen:api` refreshed.
+- Tests run: `pytest` — **82 passed** (new `test_mail_*` + existing mailer/worker); `cd web && npm run build && npm run lint` clean.
+- Manual acceptance (adapted from docs/11 §10; no addresses/secrets in this log):
+  1. `python cli.py gen-key` → set `SIGNALSDR_SECRET_KEY` in `.env` (never commit).
+  2. Settings → Add account → Save and verify → expect SMTP/IMAP/Drafts ok (wrong password → app-password helper text).
+  3. Send test email → arrives in the account’s own inbox.
+  4. New campaign → Gmail drafts → drafts only in Gmail Drafts.
+  5. New campaign → Gmail test → allowlisted inbox gets `[TEST]` mail; Outbox “Open in Gmail” works.
+  6. Reply / unsubscribe from test inbox → lead Replied or Opted out; follow-ups cancelled / suppressed after IMAP poll.
+  7. Pause all sending → blocks with `policy.sending_paused`; resume clears it.
+  8. Grep logs/reports/DB/traces for app password → must not appear.
+- Failures remaining: live prospect sends still gated (`DEMO_MODE` / `ALLOW_LIVE_SENDS`); full ICP/email gate UI polish still later.
+- Evidence: `app/mail/*`, `app/api/routes/mail.py`, Settings/Outbox UI; unit coverage for every docs/12 §3 policy rule.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

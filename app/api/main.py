@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import campaigns, system
+from app.api.routes import campaigns, mail, system
 from app.config import get_settings
 from app.infra.db import init_db
 
@@ -27,3 +27,4 @@ app.add_middleware(
 )
 app.include_router(system.router, prefix="/api")
 app.include_router(campaigns.router, prefix="/api")
+app.include_router(mail.router, prefix="/api")

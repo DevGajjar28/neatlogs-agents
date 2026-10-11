@@ -67,6 +67,20 @@
   --radius-4xl: 8px;
 }
 
+@keyframes pipeline-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.animate-pipeline-pulse {
+  animation: pipeline-pulse 1.6s ease-in-out infinite;
+}
+
 @layer base {
   * {
     border-color: var(--border);

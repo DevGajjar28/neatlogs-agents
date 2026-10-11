@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   BarChart3,
   Inbox,
@@ -10,6 +12,7 @@ import {
   Send,
   Settings2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { SystemStatus } from "@/components/shell/SystemStatus";
 import { useShell } from "@/components/shell/shell-context";
 import {
@@ -17,6 +20,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { getPendingApprovals, listCampaigns } from "@/lib/api";
+import { queryKeys } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -30,6 +35,42 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname();
   const { collapsed, toggleCollapsed } = useShell();
+  const prevCount = useRef<number | null>(null);
+
+  const campaignsQ = useQuery({
+    queryKey: queryKeys.campaigns,
+    queryFn: listCampaigns,
+    refetchInterval: 8_000,
+  });
+
+  const waiting = useMemo(
+    () => (campaignsQ.data || []).filter((c) => c.status === "waiting_approval"),
+    [campaignsQ.data],
+  );
+
+  const pendingQueries = useQueries({
+    queries: waiting.map((c) => ({
+      queryKey: queryKeys.pendingApprovals(c.id),
+      queryFn: () => getPendingApprovals(c.id),
+      refetchInterval: 8_000,
+    })),
+  });
+
+  const pendingCount = useMemo(() => {
+    return pendingQueries.reduce((sum, q) => sum + (q.data?.items?.length || 0), 0);
+  }, [pendingQueries]);
+
+  useEffect(() => {
+    if (prevCount.current !== null && pendingCount > prevCount.current) {
+      toast.message("Approval needed", {
+        description: `${pendingCount} draft${pendingCount === 1 ? "" : "s"} waiting`,
+      });
+    }
+    prevCount.current = pendingCount;
+  }, [pendingCount]);
+
+  const badge =
+    pendingCount > 0 ? String(pendingCount > 99 ? "99+" : pendingCount) : "0";
 
   return (
     <aside
@@ -87,8 +128,15 @@ export function Sidebar() {
               <Icon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
               {!collapsed ? <span>{label}</span> : null}
               {!collapsed && href === "/approvals" ? (
-                <span className="ml-auto rounded-[6px] bg-[var(--surface)] px-1.5 text-[11px] text-[var(--text-subtle)]">
-                  —
+                <span
+                  className={cn(
+                    "ml-auto rounded-[6px] px-1.5 text-[11px]",
+                    pendingCount > 0
+                      ? "bg-[var(--status-warning-soft)] font-semibold text-[var(--status-warning)]"
+                      : "bg-[var(--surface)] text-[var(--text-subtle)]",
+                  )}
+                >
+                  {badge}
                 </span>
               ) : null}
             </Link>
@@ -97,7 +145,10 @@ export function Sidebar() {
           return (
             <Tooltip key={href}>
               <TooltipTrigger asChild>{link}</TooltipTrigger>
-              <TooltipContent side="right">{label}</TooltipContent>
+              <TooltipContent side="right">
+                {label}
+                {href === "/approvals" && pendingCount > 0 ? ` (${pendingCount})` : ""}
+              </TooltipContent>
             </Tooltip>
           );
         })}

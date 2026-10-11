@@ -6,7 +6,7 @@ import json
 import random
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from langchain_core.tools import tool
@@ -19,6 +19,14 @@ from app.infra.chaos import ChaosFault, get_chaos
 DEFAULT_TIMEOUT = 60.0
 MAX_RETRIES_429 = 3
 MAX_RETRIES_5XX = 3
+
+
+def campaign_data_mode(state: dict[str, Any] | None) -> Literal["replay", "live"]:
+    """Campaign UI mode only. Env DATA_MODE is not used for campaign runs."""
+    mode = ((state or {}).get("input") or {}).get("mode")
+    if mode == "live":
+        return "live"
+    return "replay"
 
 
 class CrustdataError(Exception):
@@ -104,9 +112,14 @@ class CrustdataClient:
         ledger: BudgetLedger | None = None,
         http_client: httpx.Client | None = None,
         account_file: Path | None = None,
+        data_mode: Literal["replay", "live"] | None = None,
     ) -> None:
         clear_settings_cache()
         self.settings = get_settings()
+        # Campaign Live/Replay is the source of truth when provided.
+        self.data_mode: Literal["replay", "live"] = (
+            data_mode if data_mode in {"replay", "live"} else self.settings.data_mode
+        )
         self.base = self.settings.crustdata_base_url.rstrip("/")
         self.cache = cache or ResponseCache()
         self.ledger = ledger or BudgetLedger()
@@ -161,7 +174,7 @@ class CrustdataClient:
             self.ledger.record(campaign_id, step, endpoint, credits=0.0, cache_hit=True)
             return hit
 
-        if self.settings.data_mode == "replay" and not allow_network_in_replay:
+        if self.data_mode == "replay" and not allow_network_in_replay:
             raise ReplayMiss(endpoint, key)
 
         if not self.settings.crustdata_api_key.strip():
@@ -482,6 +495,11 @@ def save_account_snapshot(endpoints_payload: Any, credits_payload: Any, path: Pa
 # --- LangChain tools (neatlogs traces these as TOOL spans) ---
 
 _default_client: CrustdataClient | None = None
+
+
+def client_for_campaign(state: dict[str, Any] | None = None, **kwargs: Any) -> CrustdataClient:
+    """Build a Crustdata client bound to the campaign's Live/Replay choice."""
+    return CrustdataClient(data_mode=campaign_data_mode(state), **kwargs)
 
 
 def get_client() -> CrustdataClient:

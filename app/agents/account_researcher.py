@@ -14,8 +14,70 @@ from app.infra.budget import ACCOUNT_FILE, load_account_prices
 from app.infra.chaos import get_chaos
 from app.llm import get_llm
 from app.models import AccountBrief, Company, Contact, ICPProposal
-from app.tools.crustdata import CrustdataClient, CrustdataError
+from app.tools.crustdata import CrustdataClient, CrustdataError, client_for_campaign
 from app.infra.events import EventBag
+
+# Titles that can approve vendor spend. Individual contributors are never emailed.
+_BUYER_TITLE_MARKERS = (
+    "chief",
+    "cto",
+    "ceo",
+    "cio",
+    "ciso",
+    "cpo",
+    "coo",
+    "founder",
+    "co-founder",
+    "owner",
+    "partner",
+    "vp ",
+    "v.p.",
+    "vice president",
+    "head of",
+    "director",
+    "svp",
+    "evp",
+)
+_IC_TITLE_MARKERS = (
+    "software engineer",
+    "staff engineer",
+    "senior engineer",
+    "principal engineer",
+    "platform engineer",
+    "sre",
+    "devops engineer",
+    "ml engineer",
+    "data engineer",
+    "intern",
+    "associate engineer",
+)
+
+
+def is_decision_maker(title: str) -> bool:
+    """True when the title can own or approve a purchase."""
+    t = (title or "").strip().lower()
+    if not t:
+        return False
+    if any(m in t for m in _IC_TITLE_MARKERS) and not any(m in t for m in _BUYER_TITLE_MARKERS):
+        return False
+    return any(m in t for m in _BUYER_TITLE_MARKERS)
+
+
+def _buyer_titles_from_icp(icp: dict | ICPProposal | None) -> list[str]:
+    """Economic-buyer titles only; champions are not default recipients."""
+    roles: list = []
+    if isinstance(icp, ICPProposal):
+        roles = list(icp.roles or [])
+        for role in roles:
+            if role.kind == "economic_buyer":
+                return list(role.title_variants) or ["CTO", "VP Engineering", "Head of Product"]
+    elif isinstance(icp, dict):
+        for role in icp.get("roles") or []:
+            if (role or {}).get("kind") == "economic_buyer":
+                titles = list(role.get("title_variants") or [])
+                if titles:
+                    return titles
+    return ["CTO", "VP Engineering", "VP Infrastructure", "Head of Platform", "Head of Product"]
 
 
 def account_enrich_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -24,7 +86,7 @@ def account_enrich_node(state: dict[str, Any]) -> dict[str, Any]:
     companies = [Company.model_validate(c) for c in (state.get("companies") or [])]
     events = EventBag(state, "account_researcher")
     errors = list(state.get("errors") or [])
-    client = CrustdataClient()
+    client = client_for_campaign(state)
 
     already = set((state.get("accounts") or {}).keys())
     kept = [c for c in companies if c.status == "kept" and c.id not in already]
@@ -78,13 +140,10 @@ def fanout_account_companies(state: dict[str, Any]) -> list[Send] | str:
     if not kept:
         return "account_join"
 
-    icp = state.get("icp") or {}
-    titles: list[str] = []
-    for role in icp.get("roles") or []:
-        titles.extend(role.get("title_variants") or [])
-    titles = titles or ["CTO", "VP Engineering", "Head of Product"]
+    titles = _buyer_titles_from_icp(state.get("icp") or {})
     enrich_by_id = (state.get("extras") or {}).get("enrich_by_id") or {}
     live_enabled = bool((state.get("extras") or {}).get("live_people_enabled"))
+    campaign_mode = ((state.get("input") or {}).get("mode") or "replay")
 
     return [
         Send(
@@ -95,6 +154,7 @@ def fanout_account_companies(state: dict[str, Any]) -> list[Send] | str:
                 "enrich_data": enrich_by_id.get(str(company.id), {}),
                 "titles": titles,
                 "live_people_enabled": live_enabled,
+                "campaign_mode": campaign_mode,
             },
         )
         for company in kept
@@ -108,9 +168,12 @@ def account_company_node(state: dict[str, Any]) -> dict[str, Any]:
     data = dict(state.get("enrich_data") or {})
     titles = list(state.get("titles") or [])
     live_enabled = bool(state.get("live_people_enabled"))
-    events: list[dict] = []
+    events: list[dict] = [
+        {"type": "account.researching", "company": company.name, "company_id": company.id}
+    ]
     errors: list[dict] = []
-    client = CrustdataClient()
+    mode = state.get("campaign_mode") or ((state.get("input") or {}).get("mode") or "replay")
+    client = client_for_campaign({"input": {"mode": mode}})
     try:
         shard = research_company(
             client,
@@ -158,7 +221,7 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
             if url:
                 pending_urls.append((str(company_id), str(url), person))
 
-    client = CrustdataClient()
+    client = client_for_campaign(state)
     campaign_id = state["campaign_id"]
     email_by_url: dict[str, tuple[str | None, str, str]] = {}
     try:
@@ -203,16 +266,36 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
                 if guessed:
                     email, email_source, email_confidence = guessed
 
+            title = str(person.get("title") or "Leader")
+            if not is_decision_maker(title):
+                events.append(
+                    {
+                        "type": "account.skip_non_buyer",
+                        "company_id": company_id,
+                        "title": title,
+                    }
+                )
+                continue
             contact = Contact(
                 id=f"{company_id}:{_slug(str(person.get('name') or 'unknown'))}",
                 company_id=company_id,
                 name=str(person.get("name") or "Unknown"),
-                title=str(person.get("title") or "Leader"),
+                title=title,
                 role_kind="economic_buyer",
                 email=email,
                 email_source=email_source,  # type: ignore[arg-type]
                 email_confidence=email_confidence,  # type: ignore[arg-type]
                 profile_url=profile_url,
+            )
+            company_name = (by_id.get(company_id).name if by_id.get(company_id) else company_id)
+            events.append(
+                {
+                    "type": "account.contact_found",
+                    "role": title,
+                    "company": company_name,
+                    "confidence": email_confidence,
+                    "company_id": company_id,
+                }
             )
             contacts.append(contact.model_dump(mode="json"))
 
@@ -249,14 +332,10 @@ def account_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
     enriched = account_enrich_node(state)
     merged = {**state, **enriched}
     extras = merged.get("extras") or {}
-    titles: list[str] = []
     icp = ICPProposal.model_validate(merged["icp"]) if merged.get("icp") else None
-    if icp:
-        for role in icp.roles:
-            titles.extend(role.title_variants)
-    titles = titles or ["CTO", "VP Engineering", "Head of Product"]
+    titles = _buyer_titles_from_icp(icp)
     shards = []
-    client = CrustdataClient()
+    client = client_for_campaign(merged)
     try:
         for company in [Company.model_validate(c) for c in (merged.get("companies") or []) if c.get("status") == "kept"]:
             events: list[dict] = []
@@ -739,10 +818,15 @@ def _pick_by_title(people: list[dict], titles: list[str]) -> dict | None:
 
     def score(person: dict) -> int:
         title = str(person.get("title") or person.get("current_title") or "").lower()
+        if not is_decision_maker(title):
+            return -1
         return sum(1 for t in lowered if t in title)
 
-    ranked = sorted(people, key=score, reverse=True)
+    buyers = [p for p in people if is_decision_maker(str(p.get("title") or p.get("current_title") or ""))]
+    ranked = sorted(buyers, key=score, reverse=True)
     if ranked and score(ranked[0]) > 0:
+        return ranked[0]
+    if ranked:
         return ranked[0]
     return None
 

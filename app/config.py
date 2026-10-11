@@ -30,11 +30,15 @@ class Settings(BaseSettings):
 
     data_mode: Literal["replay", "live"] = "replay"
     demo_mode: bool = True
+    allow_live_sends: bool = False
     max_credits: int = 400
 
     smtp_host: str = "localhost"
     smtp_port: int = 1025
     from_email: str = "demo@signalsdr.local"
+
+    signalsdr_secret_key: str = ""
+    imap_poll_seconds: int = 60
 
     db_path: str = "signalsdr.db"
 

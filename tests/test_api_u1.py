@@ -29,7 +29,7 @@ def api_env(tmp_path, monkeypatch):
     clear_settings_cache()
 
 
-def _seed_campaign(db_path, cid: str = "u1-seed", status: str = "waiting_icp") -> None:
+def _seed_campaign(db_path, cid: str = "u1-seed", status: str = "waiting_approval") -> None:
     conn = connect(db_path)
     try:
         conn.execute(
@@ -80,9 +80,12 @@ def test_estimate_replay_zero(api_env):
 
 def test_list_and_get_campaign(api_env):
     client, db = api_env
-    _seed_campaign(db)
-    set_stage("u1-seed", "icp", "waiting")
-    with patch("app.api.status.pending_interrupt", return_value={"type": "icp_approval", "icp": {}}):
+    _seed_campaign(db, status="waiting_approval")
+    set_stage("u1-seed", "approval", "waiting")
+    with patch(
+        "app.api.status.pending_interrupt",
+        return_value={"type": "email_approval", "items": []},
+    ):
         with patch("app.api.runs.is_alive", return_value=False):
             r = client.get("/api/campaigns")
             assert r.status_code == 200
@@ -93,7 +96,7 @@ def test_list_and_get_campaign(api_env):
             d = client.get("/api/campaigns/u1-seed")
             assert d.status_code == 200
             body = d.json()
-            assert body["status"] == "waiting_icp"
+            assert body["status"] == "waiting_approval"
             assert body["stages"]
 
 
@@ -113,7 +116,7 @@ def test_create_campaign_spawns_child(api_env):
     assert r.status_code == 201
     body = r.json()
     assert body["id"].startswith("ui-")
-    assert body["status"] in {"queued", "running", "waiting_icp", "completed", "failed"}
+    assert body["status"] in {"queued", "running", "waiting_approval", "completed", "failed"}
     start.assert_called_once()
     assert start.call_args.args[0] == body["id"]
 

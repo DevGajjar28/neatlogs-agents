@@ -14,6 +14,49 @@ class StageOut(BaseModel):
     ]
     status: Literal["pending", "running", "waiting", "done", "skipped", "failed"]
     count_label: str | None = None
+    detail: str | None = None
+    updated_at: datetime | str | None = None
+
+
+class PipelineAgentOut(BaseModel):
+    agent: Literal[
+        "planner",
+        "product_researcher",
+        "buyer_finder",
+        "account_researcher",
+        "email_writer_verifier",
+        "sender",
+    ]
+    label: str
+    status: Literal["idle", "running", "waiting", "done", "failed"]
+    detail: str | None = None
+    count_label: str | None = None
+    started_at: datetime | str | None = None
+    updated_at: datetime | str | None = None
+
+
+class PipelineOut(BaseModel):
+    agents: list[PipelineAgentOut] = Field(default_factory=list)
+
+
+class PendingApprovalItem(BaseModel):
+    contact_id: str
+    lead_id: str | None = None
+    name: str | None = None
+    title: str | None = None
+    email_masked: str | None = None
+    email_confidence: str | None = None
+    company_name: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    guessed: bool = False
+
+
+class PendingApprovalsOut(BaseModel):
+    campaign_id: str
+    type: str = "email_approval"
+    waiting: bool = False
+    items: list[PendingApprovalItem] = Field(default_factory=list)
 
 
 class BudgetOut(BaseModel):
@@ -76,6 +119,27 @@ class LeadRow(BaseModel):
     redraft_count: int = 0
     status: str = "discovered"
     updated_at: datetime | str | None = None
+    contact_id: str | None = None
+    email_1_subject: str | None = None
+    email_1_body: str | None = None
+    followup_1_subject: str | None = None
+    followup_1_body: str | None = None
+    followup_2_subject: str | None = None
+    followup_2_body: str | None = None
+    sent_at: datetime | str | None = None
+    email_1_editable: bool = True
+    followup_1_editable: bool = True
+    followup_2_editable: bool = True
+
+
+class LeadSequenceStepIn(BaseModel):
+    step: Literal[1, 2, 3]
+    subject: str | None = None
+    body: str | None = None
+
+
+class LeadSequencePatchIn(BaseModel):
+    steps: list[LeadSequenceStepIn] = Field(default_factory=list)
 
 
 class LeadDetail(BaseModel):
@@ -100,6 +164,9 @@ class CreateCampaignIn(BaseModel):
     chaos: str = ""
     kill_after: str = ""
     baseline_campaign_id: str | None = None
+    mail_account_id: str | None = None
+    send_mode: Literal["sandbox", "gmail_drafts", "gmail_test", "gmail_live"] = "sandbox"
+    live_confirm_email: str | None = None
 
 
 class EstimateIn(BaseModel):
@@ -140,3 +207,172 @@ class SystemStatusOut(BaseModel):
     max_credits: int
     llm: dict[str, str]
     neatlogs: dict[str, Any]
+    max_send_mode: str = "sandbox"
+    sending_paused: bool = False
+    mail_account_count: int = 0
+    mail_account_error: bool = False
+
+
+class MailAccountOut(BaseModel):
+    id: str
+    label: str
+    provider: str
+    email: str
+    display_name: str
+    username: str
+    smtp_host: str
+    smtp_port: int
+    smtp_security: str
+    imap_host: str
+    imap_port: int
+    status: str
+    last_verified_at: str | None = None
+    last_error: str | None = None
+    daily_cap: int = 25
+    per_domain_daily_cap: int = 3
+    min_gap_seconds: int = 90
+    test_recipients: list[str] = Field(default_factory=list)
+    live_enabled: bool = False
+    signature: str = ""
+    postal_address: str = ""
+    drafts_folder: str | None = None
+    is_default: bool = False
+    has_password: bool = False
+    sent_24h: int = 0
+    cap: int = 25
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class MailAccountCreateIn(BaseModel):
+    label: str | None = None
+    provider: Literal["gmail", "workspace", "custom"] = "gmail"
+    email: str
+    display_name: str | None = None
+    username: str | None = None
+    password: str
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_security: str | None = None
+    imap_host: str | None = None
+    imap_port: int | None = None
+    daily_cap: int | None = None
+    per_domain_daily_cap: int | None = None
+    min_gap_seconds: int | None = None
+    test_recipients: list[str] | None = None
+    live_enabled: bool = False
+    signature: str | None = None
+    postal_address: str | None = None
+    is_default: bool = False
+
+
+class MailAccountPatchIn(BaseModel):
+    label: str | None = None
+    provider: Literal["gmail", "workspace", "custom"] | None = None
+    email: str | None = None
+    display_name: str | None = None
+    username: str | None = None
+    password: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_security: str | None = None
+    imap_host: str | None = None
+    imap_port: int | None = None
+    daily_cap: int | None = None
+    per_domain_daily_cap: int | None = None
+    min_gap_seconds: int | None = None
+    test_recipients: list[str] | None = None
+    live_enabled: bool | None = None
+    signature: str | None = None
+    postal_address: str | None = None
+    is_default: bool | None = None
+
+
+class MailPresetOut(BaseModel):
+    id: str
+    label: str
+    provider: str
+    smtp_host: str
+    smtp_port: int
+    smtp_security: str
+    imap_host: str
+    imap_port: int
+
+
+class VerifyOut(BaseModel):
+    ok: bool
+    detail: str
+    drafts_folder: str | None = None
+
+
+class MailActivityOut(BaseModel):
+    id: str
+    ts: str | None = None
+    kind: str
+    send_mode: str | None = None
+    recipient_masked: str | None = None
+    message_id: str | None = None
+    lead_id: str | None = None
+
+
+class SendingPausedIn(BaseModel):
+    sending_paused: bool
+
+
+class SendingPausedOut(BaseModel):
+    sending_paused: bool
+
+
+class MailPoliciesPatchIn(BaseModel):
+    daily_cap: int | None = None
+    per_domain_daily_cap: int | None = None
+    min_gap_seconds: int | None = None
+    sending_window: dict[str, Any] | None = None
+    default_test_recipients: list[str] | None = None
+
+
+class MailPoliciesOut(BaseModel):
+    sending_paused: bool
+    max_send_mode: str
+    demo_mode: bool
+    allow_live_sends: bool
+    values: dict[str, Any]
+    rules: list[dict[str, Any]]
+
+
+class PolicyEventOut(BaseModel):
+    id: int
+    ts: str | None = None
+    type: str
+    message: str
+    campaign_id: str | None = None
+    lead_id: str | None = None
+
+
+class OutboxRow(BaseModel):
+    id: str
+    lead_id: str | None = None
+    step: int = 1
+    subject: str = ""
+    from_label: str = ""
+    from_email: str | None = None
+    send_mode: str = "sandbox"
+    delivery_status: str = ""
+    ui_status: str = ""
+    message_id: str | None = None
+    actual_recipient_masked: str | None = None
+    sent_at: str | None = None
+    scheduled_at: str | None = None
+    open_in_gmail_url: str | None = None
+
+
+class ReplyOut(BaseModel):
+    id: str
+    lead_id: str
+    received_at: str | None = None
+    classification: str | None = None
+    snippet: str | None = None
+    from_masked: str | None = None
+    message_id: str | None = None
+    source: str | None = None
+    open_in_gmail_url: str | None = None

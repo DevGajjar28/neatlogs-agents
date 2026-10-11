@@ -71,9 +71,26 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
             use_llm=True,
         )
 
+        cited = len(step1.cited_evidence_ids or [])
+        events.append(
+            {
+                "type": "verifier.checked",
+                "contact": contact.name,
+                "contact_id": contact_id,
+                "n": cited,
+                "total": max(cited, 1),
+            }
+        )
         if result.action == "pass":
             verifier[contact_id] = result.model_dump(mode="json")
-            events.append({"type": "verify.pass", "contact_id": contact_id, "attempt": attempt})
+            events.append(
+                {
+                    "type": "verify.pass",
+                    "contact_id": contact_id,
+                    "contact": contact.name,
+                    "attempt": attempt,
+                }
+            )
             notes.pop(contact_id, None)
             continue
 
@@ -82,6 +99,7 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
             {
                 "type": "verify.reject",
                 "contact_id": contact_id,
+                "contact": contact.name,
                 "attempt": attempt,
                 "issues": result.issues,
                 "unsupported_claims": result.unsupported_claims,

@@ -1,4 +1,4 @@
-"""Durable follow-up worker loop over scheduled_jobs."""
+"""Durable follow-up worker loop over scheduled_jobs + IMAP inbox poll."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def process_due_jobs(
 
             reply = conn.execute(
                 """
-                SELECT kind FROM replies
+                SELECT kind, classification FROM replies
                 WHERE lead_id = ?
                 ORDER BY received_at DESC
                 LIMIT 1
@@ -51,19 +51,31 @@ def process_due_jobs(
                 (lead_id,),
             ).fetchone()
             if reply:
-                _cancel_lead_jobs(conn, lead_id, status_lead=reply["kind"])
+                lead_status = reply["kind"]
+                if reply["classification"] == "opt_out":
+                    lead_status = "opted_out"
+                elif reply["classification"] == "bounce":
+                    lead_status = "bounced"
+                elif reply["classification"] in {
+                    "interested",
+                    "not_interested",
+                    "question",
+                    "other",
+                }:
+                    lead_status = "replied"
+                _cancel_lead_jobs(conn, lead_id, status_lead=lead_status)
                 results.append(
                     {
                         "job_id": job_id,
                         "lead_id": lead_id,
                         "status": "cancelled",
-                        "reason": reply["kind"],
+                        "reason": reply["classification"] or reply["kind"],
                     }
                 )
                 continue
 
             email_row = conn.execute(
-                "SELECT step, subject, body FROM emails WHERE id = ?",
+                "SELECT step, subject, body, actual_recipient FROM emails WHERE id = ?",
                 (email_id,),
             ).fetchone()
             if not email_row:
@@ -78,10 +90,19 @@ def process_due_jobs(
                 "SELECT contact_id, campaign_id FROM leads WHERE id = ?",
                 (lead_id,),
             ).fetchone()
-            contact_email = f"{lead_id}@unknown.local"
+            # Prefer stored recipient; sandbox send() rewrites when demo_mode.
+            contact_email = (email_row["actual_recipient"] or "").strip()
+            if not contact_email or "*" in contact_email:
+                step1 = conn.execute(
+                    """
+                    SELECT actual_recipient FROM emails
+                    WHERE lead_id = ? AND step = 1 LIMIT 1
+                    """,
+                    (lead_id,),
+                ).fetchone()
+                contact_email = (step1["actual_recipient"] if step1 else "") or f"{lead_id}@unknown.local"
             confidence = "likely"
             allow_guessed = True  # already approved path to schedule
-            # Prefer sandbox; original address unknown at worker — demo rewrite handles it.
 
             try:
                 outcome = send(
@@ -110,6 +131,18 @@ def process_due_jobs(
                     }
                 )
             except (PolicyDenied, MailerError) as exc:
+                # Rate-space / window: keep pending without burning attempts hard
+                event = getattr(exc, "event", "") or ""
+                if event in {"policy.rate_spaced", "policy.outside_window"}:
+                    results.append(
+                        {
+                            "job_id": job_id,
+                            "lead_id": lead_id,
+                            "status": "deferred",
+                            "error": str(exc),
+                        }
+                    )
+                    continue
                 conn.execute(
                     """
                     UPDATE scheduled_jobs
@@ -134,12 +167,26 @@ def process_due_jobs(
 
 
 def run_forever(poll_seconds: float = 20.0, db_path: str | None = None) -> None:
-    """Poll loop for local demos. Ctrl+C to stop; schedule survives in SQLite."""
+    """Poll loop: due jobs + IMAP inbox. Ctrl+C to stop; schedule survives in SQLite."""
+    settings = get_settings()
+    last_imap = 0.0
+    imap_every = max(15.0, float(settings.imap_poll_seconds or 60))
     while True:
         results = process_due_jobs(db_path=db_path)
         if results:
             for row in results:
                 print(row)
+        now = time.time()
+        if now - last_imap >= imap_every:
+            try:
+                from app.mail.inbox import poll_all_accounts
+
+                n = poll_all_accounts(db_path=db_path)
+                if n:
+                    print({"imap_applied": n})
+            except Exception as exc:  # noqa: BLE001
+                print({"imap_error": type(exc).__name__})
+            last_imap = now
         time.sleep(poll_seconds)
 
 
@@ -160,8 +207,11 @@ def simulate_reply(lead_id: str, *, kind: str = "reply", db_path: str | None = N
     now = datetime.now(timezone.utc).isoformat()
     try:
         conn.execute(
-            "INSERT INTO replies (lead_id, kind, received_at) VALUES (?, ?, ?)",
-            (lead_id, kind, now),
+            """
+            INSERT INTO replies (lead_id, kind, received_at, classification, source, snippet)
+            VALUES (?, ?, ?, ?, 'simulated', '')
+            """,
+            (lead_id, kind, now, "opt_out" if kind == "opt_out" else "other"),
         )
         conn.execute(
             "UPDATE leads SET status = ?, updated_at = ? WHERE id = ?",

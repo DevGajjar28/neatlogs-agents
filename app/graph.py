@@ -71,7 +71,20 @@ def _count_label(name: str, state: dict[str, Any], result: dict[str, Any]) -> st
         passed = sum(1 for x in v.values() if isinstance(x, dict) and x.get("passed"))
         return f"{passed} passed"
     if name == "sender":
-        return "sent"
+        sent = 0
+        for ev in merged.get("events") or []:
+            if isinstance(ev, dict) and ev.get("type") in {"send.step1", "mail.sent", "mail.drafted"}:
+                sent += 1
+        # Prefer lead statuses if present
+        leads_sent = sum(
+            1
+            for c in (merged.get("contacts") or [])
+            if isinstance(c, dict) and c.get("status") == "sent"
+        )
+        total = max(sent, leads_sent)
+        if total == 0 and not (merged.get("drafts") or {}):
+            return "0 sent"
+        return f"{total} sent" if total else "sent"
     return None
 
 

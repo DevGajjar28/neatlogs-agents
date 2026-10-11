@@ -16,6 +16,9 @@ def email_writer_node(state: dict[str, Any]) -> dict[str, Any]:
     seller = SellerBrief.model_validate(state["seller"])
     contacts = [Contact.model_validate(c) for c in (state.get("contacts") or [])]
     accounts = state.get("accounts") or {}
+    companies = {
+        c["id"]: c for c in (state.get("companies") or []) if isinstance(c, dict) and c.get("id")
+    }
     events = EventBag(state, "email_writer")
     errors = list(state.get("errors") or [])
     icp = ICPProposal.model_validate(state["icp"]) if state.get("icp") else None
@@ -46,6 +49,15 @@ def email_writer_node(state: dict[str, Any]) -> dict[str, Any]:
         redraft_note = notes.get(contact.id) or ""
 
         try:
+            company_name = (companies.get(contact.company_id) or {}).get("name") or contact.company_id
+            events.append(
+                {
+                    "type": "email.drafting",
+                    "contact": contact.name,
+                    "company": company_name,
+                    "contact_id": contact.id,
+                }
+            )
             sequence = _write_sequence(
                 llm,
                 seller=seller,
@@ -61,6 +73,8 @@ def email_writer_node(state: dict[str, Any]) -> dict[str, Any]:
                 {
                     "type": "email.drafted",
                     "contact_id": contact.id,
+                    "contact": contact.name,
+                    "company": company_name,
                     "steps": len(sequence),
                     "attempt": int(attempts.get(contact.id, 0)),
                 }

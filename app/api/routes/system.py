@@ -11,6 +11,8 @@ from fastapi import APIRouter
 from app.api.schemas import EstimateIn, EstimateOut, HealthOut, SystemStatusOut
 from app.config import get_settings
 from app.infra.budget import ACCOUNT_FILE, estimate_campaign
+from app.infra.db import connect, init_db
+from app.mail.policy import get_setting, max_send_mode_allowed
 
 router = APIRouter(tags=["system"])
 
@@ -51,6 +53,17 @@ def system_status() -> SystemStatusOut:
         except Exception as exc:
             crust["live_error"] = str(exc)
 
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    try:
+        paused = bool(get_setting(conn, "sending_paused", False))
+        mail_count = conn.execute("SELECT COUNT(*) AS n FROM mail_accounts").fetchone()["n"]
+        mail_err = conn.execute(
+            "SELECT COUNT(*) AS n FROM mail_accounts WHERE status = 'error'"
+        ).fetchone()["n"]
+    finally:
+        conn.close()
+
     return SystemStatusOut(
         crustdata=crust,
         data_mode=settings.data_mode,
@@ -66,6 +79,10 @@ def system_status() -> SystemStatusOut:
             "traces_url": settings.neatlogs_traces_url or None,
             "endpoint": settings.neatlogs_endpoint,
         },
+        max_send_mode=max_send_mode_allowed(),
+        sending_paused=paused,
+        mail_account_count=int(mail_count or 0),
+        mail_account_error=bool(mail_err),
     )
 
 

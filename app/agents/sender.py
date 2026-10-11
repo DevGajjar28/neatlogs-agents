@@ -50,6 +50,7 @@ def sender_node(state: dict[str, Any]) -> dict[str, Any]:
                     "type": "send.step1",
                     "lead_id": lead_id,
                     "contact_id": contact_id,
+                    "contact": contact.get("name"),
                     "status": result.get("status"),
                 }
             )
@@ -87,6 +88,7 @@ def sender_node(state: dict[str, Any]) -> dict[str, Any]:
                 {
                     "type": "send.scheduled",
                     "lead_id": lead_id,
+                    "contact": contact.get("name"),
                     "step": step,
                     "run_at": run_at,
                 }

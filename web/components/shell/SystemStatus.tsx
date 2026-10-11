@@ -59,6 +59,15 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
   const tracingOn = Boolean(status.neatlogs?.configured);
   const modeLabel = status.data_mode === "live" ? "Live" : "Replay";
   const model = shortModelName(status.llm?.fast || status.llm?.strong);
+  const maxSend =
+    status.max_send_mode === "gmail_live"
+      ? "Gmail live"
+      : status.max_send_mode === "gmail_test"
+        ? "Gmail test"
+        : status.max_send_mode === "gmail_drafts"
+          ? "Gmail drafts"
+          : "Sandbox";
+  const paused = Boolean(status.sending_paused);
 
   if (collapsed) {
     return (
@@ -70,7 +79,11 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
         <span
           className={cn(
             "size-2 rounded-full",
-            tracingOn ? "bg-[var(--status-success)]" : "bg-[var(--status-danger)]",
+            paused
+              ? "bg-[var(--status-danger)]"
+              : tracingOn
+                ? "bg-[var(--status-success)]"
+                : "bg-[var(--status-danger)]",
           )}
           aria-hidden
         />
@@ -88,6 +101,14 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
         <span className="rounded-[6px] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text)]">
           {modeLabel}
         </span>
+        <span className="rounded-[6px] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text)]">
+          {maxSend}
+        </span>
+        {paused ? (
+          <span className="rounded-[6px] bg-[var(--status-danger-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--status-danger)]">
+            Sending paused
+          </span>
+        ) : null}
         {status.demo_mode ? (
           <span className="inline-flex items-center gap-1 rounded-[6px] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text)]">
             <Lock className="size-3" strokeWidth={1.75} aria-hidden />

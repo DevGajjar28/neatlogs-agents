@@ -125,7 +125,14 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
                     "cited_evidence_ids": item.get("cited_evidence_ids"),
                 },
             )
-            events.append({"type": "approval.approved", "contact_id": cid, "lead_id": lead_id})
+            events.append(
+                {
+                    "type": "approval.approved",
+                    "contact_id": cid,
+                    "lead_id": lead_id,
+                    "contact": item.get("name"),
+                }
+            )
         else:
             write_audit(
                 actor=str(decision.get("actor") or "human"),
@@ -133,7 +140,14 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
                 target=lead_id,
                 details={"contact_id": cid},
             )
-            events.append({"type": "approval.rejected", "contact_id": cid, "lead_id": lead_id})
+            events.append(
+                {
+                    "type": "approval.rejected",
+                    "contact_id": cid,
+                    "lead_id": lead_id,
+                    "contact": item.get("name"),
+                }
+            )
 
     if guessed_skipped:
         events.append({"type": "policy.guessed_skipped", "count": guessed_skipped})

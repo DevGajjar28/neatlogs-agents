@@ -713,5 +713,53 @@ def llm_smoke() -> None:
         finish()
 
 
+@app.command("gen-key")
+def gen_key() -> None:
+    """Print a Fernet key for SIGNALSDR_SECRET_KEY (do not commit the value)."""
+    from app.mail.crypto import generate_key
+
+    typer.echo(generate_key())
+
+
+mail_app = typer.Typer(help="Mail account controls")
+app.add_typer(mail_app, name="mail")
+
+
+@mail_app.command("pause-all")
+def mail_pause_all() -> None:
+    """Set settings.sending_paused so no transport sends."""
+    from app.config import get_settings
+    from app.infra.db import connect, init_db
+    from app.mail.policy import get_setting, set_setting
+
+    path = get_settings().db_path
+    init_db(path)
+    conn = connect(path)
+    try:
+        set_setting(conn, "sending_paused", True)
+        conn.commit()
+        typer.echo(f"sending_paused={get_setting(conn, 'sending_paused')}")
+    finally:
+        conn.close()
+
+
+@mail_app.command("resume-all")
+def mail_resume_all() -> None:
+    """Clear settings.sending_paused."""
+    from app.config import get_settings
+    from app.infra.db import connect, init_db
+    from app.mail.policy import get_setting, set_setting
+
+    path = get_settings().db_path
+    init_db(path)
+    conn = connect(path)
+    try:
+        set_setting(conn, "sending_paused", False)
+        conn.commit()
+        typer.echo(f"sending_paused={get_setting(conn, 'sending_paused')}")
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     app()

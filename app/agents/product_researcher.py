@@ -11,7 +11,7 @@ from app.agents.evidence import make_evidence
 from app.llm import get_llm
 from app.models import SellerBrief
 from app.tools import web
-from app.tools.crustdata import CrustdataClient, CrustdataError
+from app.tools.crustdata import CrustdataError, client_for_campaign
 from app.infra.events import EventBag
 
 
@@ -37,11 +37,12 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
     events = EventBag(state, "product_researcher")
     errors = list(state.get("errors") or [])
 
-    client = CrustdataClient()
+    client = client_for_campaign(state)
     domain = _domain(website)
     evidence = []
     pages = web.fetch_seller_pages(website)
     page_blob = "\n\n".join(f"URL: {p['url']}\n{p['text'][:3000]}" for p in pages)[:14000]
+    seller_profile: dict[str, Any] = {}
 
     for page in pages:
         for snippet in page.get("quarantined") or []:
@@ -92,6 +93,7 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
             )
             company_data = _first_company_data(enriched)
             if company_data:
+                seller_profile = company_data
                 name = (company_data.get("basic_info") or {}).get("name") or company_name
                 evidence.append(
                     make_evidence(
@@ -181,8 +183,12 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
     )
     spent = client.ledger.spent(campaign_id)
     client.close()
+    extras = dict(state.get("extras") or {})
+    if seller_profile:
+        extras["seller_profile"] = seller_profile
     return {
         "seller": brief.model_dump(mode="json"),
+        "extras": extras,
         "events": events,
         "errors": errors,
         "budget": {"credits_spent": spent},

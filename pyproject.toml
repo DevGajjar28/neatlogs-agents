@@ -28,6 +28,8 @@ dependencies = [
   "beautifulsoup4",
   "dnspython",
   "python-dotenv",
+  "cryptography",
+  "tzdata",
 ]
 
 [project.optional-dependencies]

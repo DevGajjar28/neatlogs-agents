@@ -291,7 +291,7 @@ def set_plan_phase(state: dict[str, Any], phase: str) -> dict[str, Any]:
 
 
 def widen_icp(icp: ICPProposal, widening: int) -> ICPProposal:
-    """Widen ICP one step: expand size bands, then industries."""
+    """Widen ICP: expand size, then add countries, then broaden industries."""
     data = icp.model_copy(deep=True)
     ranges = list(data.employee_count_ranges or [])
     if widening == 1:
@@ -305,12 +305,27 @@ def widen_icp(icp: ICPProposal, widening: int) -> ICPProposal:
         data.employee_count_ranges = expanded
         data.rationale = (data.rationale or "") + f" [widen#{widening}: expanded size bands]"
     else:
+        countries = list(data.countries or [])
+        for extra_country in ("United States", "United Kingdom", "Canada", "Germany"):
+            if extra_country not in countries:
+                countries.append(extra_country)
+        data.countries = countries
         industries = list(data.industries or [])
-        for extra in ("Software Development", "Technology, Information and Internet", "Information Technology and Services"):
+        for extra in (
+            "Software Development",
+            "Technology, Information and Internet",
+            "Information Technology and Services",
+            "Internet Publishing",
+        ):
             if extra not in industries:
                 industries.append(extra)
         data.industries = industries
-        if "United States" not in data.countries:
-            data.countries = list(data.countries) + ["United States"]
-        data.rationale = (data.rationale or "") + f" [widen#{widening}: broader industries]"
+        # Also nudge size once more on second widen
+        expanded = list(data.employee_count_ranges or [])
+        for band in list(expanded):
+            for neighbor in _RANGE_NEIGHBORS.get(band, []):
+                if neighbor not in expanded:
+                    expanded.append(neighbor)
+        data.employee_count_ranges = expanded
+        data.rationale = (data.rationale or "") + f" [widen#{widening}: broader geo + industries]"
     return data

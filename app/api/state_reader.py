@@ -68,3 +68,14 @@ def accounts(campaign_id: str) -> dict:
 def pending_interrupt(campaign_id: str) -> dict | None:
     payload = get_values(campaign_id).get("__interrupt_payload__")
     return payload if isinstance(payload, dict) else None
+
+
+def update_drafts(campaign_id: str, drafts: dict[str, Any]) -> None:
+    """Persist draft edits into the LangGraph checkpoint."""
+    conn, checkpointer = open_checkpointer()
+    try:
+        graph = build_graph(checkpointer)
+        graph.update_state(run_config(campaign_id), {"drafts": drafts})
+    finally:
+        conn.close()
+    invalidate(campaign_id)

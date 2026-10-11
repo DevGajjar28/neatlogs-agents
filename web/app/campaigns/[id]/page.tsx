@@ -1,33 +1,111 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import { ActivityPanel } from "@/components/campaign/ActivityPanel";
+import { AgentPipeline } from "@/components/campaign/AgentPipeline";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
 import { Mono } from "@/components/common/Mono";
+import { RelativeTime } from "@/components/common/RelativeTime";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { CardSkeleton } from "@/components/common/Skeletons";
+import { LeadReplyDrawer } from "@/components/mail/LeadReplyDrawer";
 import { PageTitle } from "@/components/shell/page-title";
-import { ApiError, getCampaign } from "@/lib/api";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  ApiError,
+  getCampaign,
+  getCampaignPipeline,
+  listCampaignEvents,
+  listCampaignLeads,
+  listCampaignReplies,
+  type LeadRow,
+  type PipelineAgent,
+} from "@/lib/api";
 import { formatCredits } from "@/lib/format";
 import { queryKeys } from "@/lib/keys";
-import { cn } from "@/lib/utils";
+
+function truncate(s: string | null | undefined, n = 36): string {
+  if (!s) return "—";
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
 
 export default function CampaignRunPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityAgent, setActivityAgent] = useState<PipelineAgent | null>(null);
+
   const q = useQuery({
     queryKey: queryKeys.campaign(id),
     queryFn: () => getCampaign(id),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      if (status && ["completed", "halted", "failed"].includes(status) && !query.state.data?.is_alive) {
+      if (
+        status &&
+        ["completed", "halted", "failed"].includes(status) &&
+        !query.state.data?.is_alive
+      ) {
         return false;
       }
       return 3_000;
     },
   });
 
+  const live =
+    Boolean(q.data?.is_alive) ||
+    ["running", "waiting_approval", "queued"].includes(q.data?.status || "");
+
+  const pipelineQ = useQuery({
+    queryKey: queryKeys.campaignPipeline(id),
+    queryFn: () => getCampaignPipeline(id),
+    refetchInterval: live ? 2_000 : false,
+  });
+
+  const eventsQ = useQuery({
+    queryKey: queryKeys.campaignEvents(id),
+    queryFn: () => listCampaignEvents(id),
+    refetchInterval: live || activityOpen ? 3_000 : 15_000,
+  });
+
+  const leadsQ = useQuery({
+    queryKey: queryKeys.campaignLeads(id),
+    queryFn: () => listCampaignLeads(id),
+    refetchInterval: 5_000,
+  });
+
+  const repliesQ = useQuery({
+    queryKey: queryKeys.campaignReplies(id),
+    queryFn: () => listCampaignReplies(id),
+    refetchInterval: 10_000,
+  });
+
+  const replies = repliesQ.data;
+  const replyByLead = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof replies>[number]>();
+    for (const r of replies || []) {
+      if (!map.has(r.lead_id)) map.set(r.lead_id, r);
+    }
+    return map;
+  }, [replies]);
+
   const title = q.data?.seller_name || id;
+  const selectedReply = selectedLead
+    ? replyByLead.get(selectedLead.lead_id) || null
+    : null;
+  const sendMode = String(q.data?.run_facts?.send_mode || "sandbox");
+  const mailLabel = q.data?.run_facts?.mail_account_label
+    ? String(q.data.run_facts.mail_account_label)
+    : null;
 
   return (
     <>
@@ -54,53 +132,122 @@ export default function CampaignRunPage() {
             <StatusBadge status={q.data.status} />
             {q.data.is_alive ? (
               <span className="inline-flex items-center gap-1.5 text-[12px] text-[var(--status-info)]">
-                <span className="size-1.5 animate-pulse rounded-full bg-[var(--status-info)]" />
+                <span className="size-1.5 animate-pipeline-pulse rounded-full bg-[var(--status-info)]" />
                 Running
               </span>
             ) : null}
           </div>
 
-          <div className="rounded-[8px] border border-[var(--border)] bg-[var(--surface)] p-4">
-            <h3 className="mb-3 text-[14px] font-semibold">Stages</h3>
-            <ol className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
-              {(q.data.stages || []).map((stage) => (
-                <li
-                  key={stage.stage}
-                  className={cn(
-                    "rounded-[6px] border border-[var(--border)] px-2 py-2",
-                    stage.status === "running" && "border-[var(--accent)] bg-[var(--accent-soft)]",
-                    stage.status === "waiting" && "border-[var(--status-warning)] bg-[var(--status-warning-soft)]",
-                    stage.status === "failed" && "border-[var(--status-danger)] bg-[var(--status-danger-soft)]",
-                  )}
-                >
-                  <div className="text-[12px] font-medium capitalize">{stage.stage}</div>
-                  <div className="text-[11px] text-[var(--text-subtle)] capitalize">
-                    {stage.status}
-                    {stage.count_label ? ` · ${stage.count_label}` : ""}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </div>
+          <AgentPipeline
+            agents={pipelineQ.data?.agents || []}
+            selectedAgent={activityAgent?.agent}
+            onSelectAgent={(agent) => {
+              setActivityAgent(agent);
+              setActivityOpen(true);
+            }}
+          />
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Stat
-              label="Leads"
-              value={`${q.data.leads_found} / ${q.data.leads_target}`}
-            />
+          <div className="grid gap-4 md:grid-cols-4">
+            <Stat label="Leads" value={`${q.data.leads_found} / ${q.data.leads_target}`} />
             <Stat
               label="Credits"
               value={`${formatCredits(q.data.credits_spent)} / ${formatCredits(q.data.credit_cap)}`}
             />
-            <Stat label="Mode" value={q.data.mode} />
+            <Stat label="Data mode" value={q.data.mode} />
+            <Stat
+              label="Send"
+              value={
+                sendMode === "sandbox"
+                  ? "Sandbox"
+                  : `${sendMode.replace("gmail_", "")}${mailLabel ? ` · ${mailLabel}` : ""}`
+              }
+            />
           </div>
 
-          <p className="text-[12px] text-[var(--text-subtle)]">
-            ICP approval and the full run timeline ship next. If status is waiting for you, use Approvals
-            or the Phase 7 UI until those screens are ready.
-          </p>
+          <div className="rounded-[8px] border border-[var(--border)] bg-[var(--surface)]">
+            <div className="border-b border-[var(--border)] px-4 py-3">
+              <h3 className="text-[14px] font-semibold">Leads</h3>
+              <p className="text-[12px] text-[var(--text-muted)]">
+                Open a row to edit the email sequence or view replies.
+              </p>
+            </div>
+            {(leadsQ.data || []).length === 0 ? (
+              <p className="px-4 py-6 text-[13px] text-[var(--text-muted)]">
+                No leads yet for this run.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[12px]">Contact</TableHead>
+                      <TableHead className="text-[12px]">Company</TableHead>
+                      <TableHead className="text-[12px]">Email</TableHead>
+                      <TableHead className="text-[12px]">Email 1</TableHead>
+                      <TableHead className="text-[12px]">Follow-up 1</TableHead>
+                      <TableHead className="text-[12px]">Follow-up 2</TableHead>
+                      <TableHead className="text-[12px]">Sent</TableHead>
+                      <TableHead className="text-[12px]">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(leadsQ.data || []).map((lead) => (
+                      <TableRow
+                        key={lead.lead_id}
+                        className="cursor-pointer"
+                        onClick={() => setSelectedLead(lead)}
+                      >
+                        <TableCell className="text-[13px]">
+                          {lead.contact_name || "—"}
+                        </TableCell>
+                        <TableCell className="text-[13px]">{lead.company_name}</TableCell>
+                        <TableCell>
+                          <Mono className="text-[12px]">{lead.email_masked || "—"}</Mono>
+                        </TableCell>
+                        <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
+                          {truncate(lead.email_1_subject)}
+                        </TableCell>
+                        <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
+                          {truncate(lead.followup_1_subject)}
+                        </TableCell>
+                        <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
+                          {truncate(lead.followup_2_subject)}
+                        </TableCell>
+                        <TableCell className="text-[12px]">
+                          {lead.sent_at ? (
+                            <RelativeTime value={lead.sent_at} />
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={lead.status} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
+
+      <LeadReplyDrawer
+        open={Boolean(selectedLead)}
+        onOpenChange={(o) => !o && setSelectedLead(null)}
+        lead={selectedLead}
+        reply={selectedReply}
+        campaignId={id}
+      />
+
+      <ActivityPanel
+        open={activityOpen}
+        onOpenChange={setActivityOpen}
+        events={eventsQ.data || []}
+        agentFilter={activityAgent?.agent}
+        agentLabel={activityAgent?.label}
+      />
     </>
   );
 }
@@ -109,7 +256,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[8px] border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="text-[12px] text-[var(--text-subtle)]">{label}</div>
-      <Mono className="mt-1 text-[18px] font-semibold">{value}</Mono>
+      <Mono className="mt-1 text-[16px] font-semibold">{value}</Mono>
     </div>
   );
 }

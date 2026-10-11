@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS emails (
     status TEXT NOT NULL,
     idempotency_key TEXT NOT NULL UNIQUE,
     sent_at TEXT,
+    mail_account_id TEXT,
+    send_mode TEXT,
+    message_id TEXT,
+    in_reply_to TEXT,
+    actual_recipient TEXT,
+    delivery_status TEXT,
+    provider_response TEXT,
     FOREIGN KEY (lead_id) REFERENCES leads(id)
 );
 
@@ -56,8 +63,13 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
 CREATE TABLE IF NOT EXISTS replies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     lead_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('reply', 'opt_out')),
+    kind TEXT NOT NULL,
     received_at TEXT NOT NULL,
+    message_id TEXT,
+    from_masked TEXT,
+    classification TEXT,
+    snippet TEXT,
+    source TEXT,
     FOREIGN KEY (lead_id) REFERENCES leads(id)
 );
 
@@ -155,6 +167,43 @@ CREATE TABLE IF NOT EXISTS email_decisions (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (campaign_id, contact_id)
 );
+
+CREATE TABLE IF NOT EXISTS mail_accounts (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    email TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    password_enc TEXT,
+    smtp_host TEXT NOT NULL,
+    smtp_port INTEGER NOT NULL,
+    smtp_security TEXT NOT NULL,
+    imap_host TEXT NOT NULL,
+    imap_port INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    last_verified_at TEXT,
+    last_error TEXT,
+    daily_cap INTEGER NOT NULL DEFAULT 25,
+    per_domain_daily_cap INTEGER NOT NULL DEFAULT 3,
+    min_gap_seconds INTEGER NOT NULL DEFAULT 90,
+    test_recipients_json TEXT NOT NULL DEFAULT '[]',
+    live_enabled INTEGER NOT NULL DEFAULT 0,
+    signature TEXT NOT NULL DEFAULT '',
+    postal_address TEXT NOT NULL DEFAULT '',
+    drafts_folder TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mail_send_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL,
+    recipient_hash TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    ts TEXT NOT NULL
+);
 """
 
 TABLES = (
@@ -173,6 +222,8 @@ TABLES = (
     "gate_decisions",
     "settings",
     "email_decisions",
+    "mail_accounts",
+    "mail_send_log",
 )
 
 _CAMPAIGN_COLS = {
@@ -182,6 +233,24 @@ _CAMPAIGN_COLS = {
     "seller_name": "TEXT",
     "seller_domain": "TEXT",
     "baseline_campaign_id": "TEXT",
+}
+
+_EMAIL_COLS = {
+    "mail_account_id": "TEXT",
+    "send_mode": "TEXT",
+    "message_id": "TEXT",
+    "in_reply_to": "TEXT",
+    "actual_recipient": "TEXT",
+    "delivery_status": "TEXT",
+    "provider_response": "TEXT",
+}
+
+_REPLY_COLS = {
+    "message_id": "TEXT",
+    "from_masked": "TEXT",
+    "classification": "TEXT",
+    "snippet": "TEXT",
+    "source": "TEXT",
 }
 
 
@@ -197,16 +266,24 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def _add_cols(conn: sqlite3.Connection, table: str, cols: dict[str, str]) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if not existing:
+        return
+    for name, decl in cols.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Additive migrations for existing DB files."""
     cache_cols = {row[1] for row in conn.execute("PRAGMA table_info(cache)").fetchall()}
     if cache_cols and "campaign_id" not in cache_cols:
         conn.execute("ALTER TABLE cache ADD COLUMN campaign_id TEXT")
 
-    camp_cols = {row[1] for row in conn.execute("PRAGMA table_info(campaigns)").fetchall()}
-    for name, decl in _CAMPAIGN_COLS.items():
-        if camp_cols and name not in camp_cols:
-            conn.execute(f"ALTER TABLE campaigns ADD COLUMN {name} {decl}")
+    _add_cols(conn, "campaigns", _CAMPAIGN_COLS)
+    _add_cols(conn, "emails", _EMAIL_COLS)
+    _add_cols(conn, "replies", _REPLY_COLS)
 
 
 def init_db(db_path: str | Path) -> None:

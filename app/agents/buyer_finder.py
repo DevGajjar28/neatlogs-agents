@@ -5,15 +5,24 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from app.agents.evidence import make_evidence
 from app.agents.planner import set_plan_phase
 from app.llm import get_llm
 from app.models import BuyerRole, Company, ICPProposal, SellerBrief
-from app.tools.crustdata import CrustdataClient, CrustdataError
+from app.tools.crustdata import CrustdataClient, CrustdataError, client_for_campaign
 from app.infra.events import EventBag
+
+_DEFAULT_BUYER_TITLES = [
+    "CTO",
+    "VP Engineering",
+    "VP of Engineering",
+    "VP Infrastructure",
+    "Head of Platform",
+    "Head of Infrastructure",
+    "Chief Technology Officer",
+]
 
 
 class _IcpDraft(BaseModel):
@@ -24,6 +33,8 @@ class _IcpDraft(BaseModel):
     economic_buyer_titles: list[str] = Field(default_factory=list)
     champion_titles: list[str] = Field(default_factory=list)
     rationale: str = ""
+    buyer_why: str = ""
+    champion_why: str = ""
 
 
 def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -32,7 +43,7 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
     seller = SellerBrief.model_validate(state["seller"])
     events = EventBag(state, "buyer_finder")
     errors = list(state.get("errors") or [])
-    client = CrustdataClient()
+    client = client_for_campaign(state)
 
     customer_ids: list[int] = []
     if seller.named_customers:
@@ -45,6 +56,13 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
             customer_ids = _collect_ids(identified)
         except CrustdataError as exc:
             errors.append({"step": "buyer.customers_identify", "error": str(exc)})
+            events.append(
+                {
+                    "type": "buyer.data_error",
+                    "step": "buyer.customers_identify",
+                    "detail": str(exc)[:200],
+                }
+            )
 
     customer_profiles: list[dict] = []
     if customer_ids:
@@ -60,20 +78,53 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
             customer_profiles = _collect_company_data(enriched)
         except CrustdataError as exc:
             errors.append({"step": "buyer.customers_enrich", "error": str(exc)})
+            events.append(
+                {
+                    "type": "buyer.data_error",
+                    "step": "buyer.customers_enrich",
+                    "detail": str(exc)[:200],
+                }
+            )
 
-    industries = _top_values(customer_profiles, _industry) or ["Software Development"]
-    countries = _top_values(customer_profiles, _country) or ["United States"]
-    ranges = _top_values(customer_profiles, _employee_range) or ["51-200", "201-500"]
+    industries = _top_values(customer_profiles, _industry)
+    countries = _top_values(customer_profiles, _country)
+    ranges = _top_values(customer_profiles, _employee_range)
 
+    # Seller profile when customer enrich is empty
+    seller_profile = (state.get("extras") or {}).get("seller_profile") or {}
+    if not industries and seller_profile:
+        industries = [_industry(seller_profile)] if _industry(seller_profile) else []
+        countries = [_country(seller_profile)] if _country(seller_profile) else []
+        ranges = [_employee_range(seller_profile)] if _employee_range(seller_profile) else []
+
+    filters_fixed = bool(industries and countries and ranges)
     llm = get_llm("strong")
-    prompt = (
-        "Propose buyer roles and a short rationale only. Do NOT invent new industries/countries/"
-        "size bands; those are fixed from customer evidence.\n"
-        f"Seller: {seller.company_name} — {seller.one_liner}\n"
-        f"Products: {seller.products}\nValue props: {seller.value_props}\n"
-        f"Named customers: {seller.named_customers}\n"
-        f"Fixed industries: {industries}\nFixed countries: {countries}\nFixed size bands: {ranges}\n"
-    )
+    if filters_fixed:
+        prompt = (
+            "You are a B2B sales strategist. Industries/countries/size are FIXED from customer "
+            "evidence — copy them into the output and do not invent replacements.\n"
+            "Propose who can APPROVE SPEND for this product (economic buyers: C-level, VP, Head, "
+            "Director, Founder). Do NOT list Staff/Software/Platform Engineers as buyers.\n"
+            "Champions are optional influencers only.\n"
+            f"Seller: {seller.company_name} — {seller.one_liner}\n"
+            f"Products: {seller.products}\nValue props: {seller.value_props}\n"
+            f"Pricing: {seller.pricing_notes}\n"
+            f"Named customers: {seller.named_customers}\n"
+            f"Fixed industries: {industries}\nFixed countries: {countries}\n"
+            f"Fixed size bands: {ranges}\n"
+        )
+    else:
+        prompt = (
+            "You are a B2B sales strategist. Derive a lookalike ICP from the product itself.\n"
+            "Propose industries, countries, and employee_count_ranges suitable for Crustdata "
+            "(use bands like 11-50, 51-200, 201-500, 501-1000, 1001-5000).\n"
+            "Propose who can APPROVE SPEND (CTO, VP Engineering, VP Infrastructure, Head of "
+            "Platform, etc.). Never list individual-contributor engineers as economic buyers.\n"
+            f"Seller: {seller.company_name} — {seller.one_liner}\n"
+            f"Products: {seller.products}\nValue props: {seller.value_props}\n"
+            f"Pricing: {seller.pricing_notes}\n"
+            f"Named customers (may be unverified): {seller.named_customers}\n"
+        )
     try:
         draft = llm.with_structured_output(_IcpDraft).invoke(prompt)
         if not isinstance(draft, _IcpDraft):
@@ -83,10 +134,20 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
         if "llm_bad_json" in str(exc):
             events.append({"type": "recovery.llm_bad_json", "step": "buyer_propose_icp"})
         draft = _IcpDraft(
-            economic_buyer_titles=["VP Engineering", "CTO", "Head of Product"],
-            champion_titles=["Engineering Manager", "Product Manager"],
-            rationale="Fallback roles because structured LLM output failed.",
+            industries=industries or ["Technology, Information and Internet"],
+            countries=countries or ["United States"],
+            employee_count_ranges=ranges or ["51-200", "201-500", "501-1000"],
+            economic_buyer_titles=list(_DEFAULT_BUYER_TITLES),
+            champion_titles=["Engineering Manager", "Director of Engineering"],
+            rationale="Fallback ICP from seller brief because structured LLM output failed.",
+            buyer_why="Owns infrastructure and platform budget",
+            champion_why="Evaluates day-to-day fit before the buyer signs",
         )
+
+    if not filters_fixed:
+        industries = list(draft.industries or industries) or ["Technology, Information and Internet"]
+        countries = list(draft.countries or countries) or ["United States"]
+        ranges = list(draft.employee_count_ranges or ranges) or ["51-200", "201-500", "501-1000"]
 
     industries = _validate_autocomplete(client, "basic_info.industries", industries, campaign_id)
     countries = _validate_autocomplete(client, "locations.country", countries, campaign_id)
@@ -111,41 +172,52 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    low_conf = len(seller.named_customers) < 3
+    low_conf = len(customer_profiles) < 3
     evidence = list(seller.evidence[:5])
     if low_conf:
         evidence.append(
             make_evidence(
-                "ICP confidence low: fewer than 3 named customers on seller site",
+                "ICP confidence lower: fewer than 3 enriched named-customer profiles",
                 source_type="user_input",
                 source_ref="seller_brief",
                 confidence="low",
             )
         )
 
+    buyer_titles = [
+        t for t in (draft.economic_buyer_titles or _DEFAULT_BUYER_TITLES) if _is_buyer_title(t)
+    ] or list(_DEFAULT_BUYER_TITLES)
+
     roles = [
         BuyerRole(
-            title_variants=draft.economic_buyer_titles
-            or ["VP Engineering", "CTO", "Chief Technology Officer"],
+            title_variants=buyer_titles,
             kind="economic_buyer",
-            why="Owns tooling budget and platform outcomes",
-        ),
-        BuyerRole(
-            title_variants=draft.champion_titles or ["Engineering Manager", "Product Manager"],
-            kind="champion",
-            why="Feels day-to-day product analytics / engineering pain",
+            why=draft.buyer_why or "Owns budget and vendor approval for this product",
         ),
     ]
+    if draft.champion_titles:
+        roles.append(
+            BuyerRole(
+                title_variants=draft.champion_titles,
+                kind="champion",
+                why=draft.champion_why or "Influences evaluation; not the default recipient",
+            )
+        )
 
     icp = ICPProposal(
-        industries=industries or ["Software Development"],
+        industries=industries,
         headcount_min=None,
         headcount_max=None,
-        countries=countries or ["United States"],
-        employee_count_ranges=ranges or ["51-200", "201-500"],
+        countries=countries,
+        employee_count_ranges=ranges,
         funding_stages=draft.funding_stages or [],
         roles=roles,
-        rationale=draft.rationale or "ICP derived from named customer enrich",
+        rationale=draft.rationale
+        or (
+            "ICP from enriched named customers"
+            if customer_profiles
+            else "ICP inferred from seller product brief"
+        ),
         evidence=evidence,
         approved=False,
         edited_by_user=False,
@@ -164,6 +236,7 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
             "employee_count_ranges": icp.employee_count_ranges,
             "low_confidence_icp": low_conf,
             "customer_profiles": len(customer_profiles),
+            "source": "customers" if customer_profiles else "seller_product",
         }
     )
     spent = client.ledger.spent(campaign_id)
@@ -179,50 +252,20 @@ def buyer_propose_icp_node(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def icp_gate_node(state: dict[str, Any]) -> dict[str, Any]:
-    """Human gate 1: interrupt with ICP, roles, and customer evidence; resume approves/edits."""
+    """Auto-approve ICP and continue to paid company search (no human interrupt)."""
     from app.infra.events import set_stage
 
     icp_raw = dict(state.get("icp") or {})
     events = EventBag(state, "buyer_finder")
-    payload = {
-        "type": "icp_approval",
-        "campaign_id": state.get("campaign_id"),
-        "icp": icp_raw,
-        "roles": icp_raw.get("roles") or [],
-        "evidence": icp_raw.get("evidence") or [],
-        "message": "Approve or edit the ICP before paid company search.",
-    }
-    if state.get("campaign_id"):
-        set_stage(str(state["campaign_id"]), "icp", "waiting")
-    decision = interrupt(payload)
     if state.get("campaign_id"):
         set_stage(str(state["campaign_id"]), "icp", "done")
-    if not isinstance(decision, dict):
-        decision = {"approved": bool(decision)}
 
-    approved = bool(decision.get("approved", True))
-    edited = decision.get("icp")
-    if isinstance(edited, dict):
-        merged = {**icp_raw, **edited}
-        icp = ICPProposal.model_validate(merged)
-        icp.edited_by_user = True
-    else:
-        icp = ICPProposal.model_validate(icp_raw)
-
-    icp.approved = approved
-    if not approved:
-        events.append({"type": "icp.rejected", "by": "human"})
-        return {
-            "icp": icp.model_dump(mode="json"),
-            "events": events,
-            "halt_reason": "icp_rejected",
-            "plan": set_plan_phase(state, "done"),
-        }
-
+    icp = ICPProposal.model_validate(icp_raw)
+    icp.approved = True
     events.append(
         {
-            "type": "icp.approved",
-            "edited_by_user": icp.edited_by_user,
+            "type": "icp.auto_approved",
+            "edited_by_user": False,
             "industries": icp.industries,
             "countries": icp.countries,
         }
@@ -246,7 +289,7 @@ def buyer_search_node(state: dict[str, Any]) -> dict[str, Any]:
     exclude = list(extras.get("exclude_domains") or [seller.domain])
     customer_domains = list(extras.get("customer_domains") or [])
 
-    client = CrustdataClient()
+    client = client_for_campaign(state)
     stable_query = (
         (state.get("input") or {}).get("description")
         or seller.one_liner
@@ -412,12 +455,19 @@ def _search_companies(
             events.append({"type": "buyer.search", "strategy": strategy_used, "count": len(rows)})
         except CrustdataError as exc:
             errors.append({"step": "buyer.search_lookalike", "error": str(exc)})
+            events.append(
+                {
+                    "type": "buyer.search_failed",
+                    "step": "buyer.search_lookalike",
+                    "detail": str(exc)[:200],
+                }
+            )
 
     # Strategy B: ranked hybrid search with the same hard filters.
     if len(rows) < n:
         body_b = {
             "filters": {"op": "and", "conditions": hard} if hard else None,
-            "search": {"query": value_prop or "B2B software analytics", "mode": "hybrid"},
+            "search": {"query": value_prop or "B2B software platform", "mode": "hybrid"},
             "fields": fields,
             "limit": min(limit, 100),
         }
@@ -429,6 +479,13 @@ def _search_companies(
             events.append({"type": "buyer.search", "strategy": strategy_used, "count": len(rows)})
         except CrustdataError as exc:
             errors.append({"step": "buyer.search", "error": str(exc)})
+            events.append(
+                {
+                    "type": "buyer.search_failed",
+                    "step": "buyer.search",
+                    "detail": str(exc)[:200],
+                }
+            )
 
     if len(rows) < n and hard:
         try:
@@ -447,6 +504,13 @@ def _search_companies(
             events.append({"type": "buyer.search", "strategy": strategy_used, "count": len(rows)})
         except CrustdataError as exc:
             errors.append({"step": "buyer.search_filters", "error": str(exc)})
+            events.append(
+                {
+                    "type": "buyer.search_failed",
+                    "step": "buyer.search_filters",
+                    "detail": str(exc)[:200],
+                }
+            )
 
     companies: list[Company] = []
     for row in rows:
@@ -552,6 +616,19 @@ def _company_rows(payload: Any) -> list[dict]:
     if isinstance(payload, list):
         return [r for r in payload if isinstance(r, dict)]
     return []
+
+
+def _is_buyer_title(title: str) -> bool:
+    """Keep budget owners; drop IC engineer titles."""
+    t = (title or "").strip()
+    if not t:
+        return False
+    tl = t.lower()
+    if any(x in tl for x in ("cto", "ceo", "cio", "ciso", "cpo", "founder", "vp", "vice president", "head of", "director", "chief")):
+        return True
+    if "engineer" in tl or "developer" in tl:
+        return False
+    return True
 
 
 def _industry(data: dict) -> str | None:

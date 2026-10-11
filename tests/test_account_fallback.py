@@ -183,6 +183,10 @@ def test_enrich_chaos_empty_people_and_join(monkeypatch):
         lambda *a, **k: fake,
     )
     monkeypatch.setattr(
+        "app.agents.account_researcher.client_for_campaign",
+        lambda *a, **k: fake,
+    )
+    monkeypatch.setattr(
         "app.agents.account_researcher.get_llm",
         lambda kind="fast": type(
             "L",
