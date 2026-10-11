@@ -59,7 +59,10 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
-        {children}
+        {/* cmdk Input/List must sit under Command context or subscribe() crashes */}
+        <Command className="[&_[data-slot=command-input-wrapper]]:border-b [&_[data-slot=command-input-wrapper]]:border-border">
+          {children}
+        </Command>
       </DialogContent>
     </Dialog>
   )

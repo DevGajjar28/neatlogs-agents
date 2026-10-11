@@ -6,6 +6,7 @@ import {
   BarChart3,
   Inbox,
   LayoutList,
+  Plus,
   Send,
   Settings2,
 } from "lucide-react";
@@ -29,7 +30,7 @@ const NAV_ITEMS = [
 
 export function CommandMenu() {
   const router = useRouter();
-  const { commandOpen, setCommandOpen } = useShell();
+  const { commandOpen, setCommandOpen, setNewCampaignOpen } = useShell();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -43,10 +44,26 @@ export function CommandMenu() {
   }, [commandOpen, setCommandOpen]);
 
   return (
-    <CommandDialog open={commandOpen} onOpenChange={setCommandOpen} title="Command palette">
+    <CommandDialog
+      open={commandOpen}
+      onOpenChange={setCommandOpen}
+      title="Command palette"
+    >
       <CommandInput placeholder="Jump to…" />
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
+        <CommandGroup heading="Actions">
+          <CommandItem
+            value="New campaign"
+            onSelect={() => {
+              setCommandOpen(false);
+              setNewCampaignOpen(true);
+            }}
+          >
+            <Plus className="size-4" strokeWidth={1.75} />
+            New campaign
+          </CommandItem>
+        </CommandGroup>
         <CommandGroup heading="Navigation">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => (
             <CommandItem

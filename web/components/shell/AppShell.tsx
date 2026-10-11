@@ -1,5 +1,6 @@
 "use client";
 
+import { NewCampaignDrawer } from "@/components/campaign/NewCampaignDrawer";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Header } from "@/components/shell/Header";
 import { CommandMenu } from "@/components/shell/CommandMenu";
@@ -18,6 +19,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <CommandMenu />
+        <NewCampaignDrawer />
       </TooltipProvider>
     </ShellProvider>
   );

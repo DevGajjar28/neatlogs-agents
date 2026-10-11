@@ -1,19 +1,19 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PageTitle } from "@/components/shell/page-title";
+import { useShell } from "@/components/shell/shell-context";
 
 export default function OutboxPage() {
-  const router = useRouter();
+  const { setNewCampaignOpen } = useShell();
   return (
     <>
       <PageTitle title="Outbox" />
       <EmptyState
-        title="Outbox is empty"
-        description="Sent mail and scheduled follow-ups will show here after a campaign sends through Mailpit."
-        actionLabel="Open campaigns"
-        onAction={() => router.push("/campaigns")}
+        title="No mail sent yet"
+        description="Approved emails and follow-ups will appear here after you send from a campaign."
+        actionLabel="New campaign"
+        onAction={() => setNewCampaignOpen(true)}
       />
     </>
   );

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export function Header() {
-  const { breadcrumbs, setCommandOpen } = useShell();
+  const { breadcrumbs, setCommandOpen, setNewCampaignOpen } = useShell();
 
   return (
     <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-4 border-b border-[var(--border)] bg-[var(--surface)] px-6">
@@ -62,7 +62,7 @@ export function Header() {
       <Button
         type="button"
         className="h-8 gap-1.5 bg-[var(--primary)] text-[var(--primary-fg)] hover:bg-[var(--primary-hover)]"
-        onClick={() => setCommandOpen(true)}
+        onClick={() => setNewCampaignOpen(true)}
       >
         <Plus className="size-4" strokeWidth={1.75} aria-hidden />
         New campaign

@@ -31,7 +31,7 @@ export default function SettingsPage() {
             message={
               q.error instanceof ApiError
                 ? q.error.message
-                : "Can't reach the SignalSDR API at localhost:8000. Start it with `python cli.py serve`."
+                : "Can't reach SignalSDR right now. Start the backend, then try again."
             }
             actionLabel="Retry"
             onAction={() => q.refetch()}

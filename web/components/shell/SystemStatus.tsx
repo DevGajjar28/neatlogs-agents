@@ -39,7 +39,7 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
     const msg =
       q.error instanceof ApiError
         ? q.error.message
-        : "Can't reach the SignalSDR API at localhost:8000. Start it with `python cli.py serve`.";
+        : "Can't reach SignalSDR right now. Start the backend, then try again.";
     return (
       <Link
         href="/settings"
@@ -49,7 +49,7 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
         )}
         title={msg}
       >
-        {collapsed ? "API" : msg}
+        {collapsed ? "Offline" : msg}
       </Link>
     );
   }

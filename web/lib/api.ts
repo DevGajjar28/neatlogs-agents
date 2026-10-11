@@ -48,7 +48,7 @@ export async function api<T = unknown>(
     });
   } catch {
     throw new ApiError(
-      "Can't reach the SignalSDR API at localhost:8000. Start it with `python cli.py serve`.",
+      "Can't reach SignalSDR right now. Start the backend, then try again.",
       0,
       null,
     );
@@ -107,6 +107,88 @@ export type SystemStatus = {
 
 export function getSystemStatus() {
   return api<SystemStatus>("/system/status");
+}
+
+export type CampaignSummary = {
+  id: string;
+  seller_name: string;
+  seller_domain: string;
+  status: string;
+  current_stage?: string | null;
+  stages?: {
+    stage: string;
+    status: string;
+    count_label?: string | null;
+  }[];
+  leads_found: number;
+  leads_target: number;
+  credits_spent: number;
+  credit_cap: number;
+  mode: "replay" | "live";
+  started_at?: string | null;
+  trace_url?: string | null;
+};
+
+export type CampaignDetail = CampaignSummary & {
+  budget?: {
+    cap: number;
+    spent: number;
+    estimated_total?: number | null;
+    by_step?: { step: string; credits: number }[];
+    cache_hit_rate?: number;
+    reconciled?: boolean | null;
+  };
+  recoveries?: Record<string, number>;
+  run_facts?: Record<string, unknown>;
+  is_alive?: boolean;
+  can_resume?: boolean;
+  links?: Record<string, string | null>;
+};
+
+export type CreateCampaignInput = {
+  company_name: string;
+  website: string;
+  description?: string;
+  n?: number;
+  mode?: "replay" | "live";
+  cap?: number | null;
+  chaos?: string;
+  kill_after?: string;
+  baseline_campaign_id?: string | null;
+};
+
+export type EstimateOut = {
+  total: number;
+  by_step: { step: string; endpoint?: string; credits: number }[];
+};
+
+export function listCampaigns() {
+  return api<CampaignSummary[]>("/campaigns");
+}
+
+export function getCampaign(id: string) {
+  return api<CampaignDetail>(`/campaigns/${encodeURIComponent(id)}`);
+}
+
+export function createCampaign(body: CreateCampaignInput) {
+  return api<CampaignSummary>("/campaigns", {
+    method: "POST",
+    body: JSON.stringify({
+      description: "",
+      n: 10,
+      mode: "replay",
+      chaos: "",
+      kill_after: "",
+      ...body,
+    }),
+  });
+}
+
+export function estimateCampaign(n: number, mode: "replay" | "live") {
+  return api<EstimateOut>("/estimate", {
+    method: "POST",
+    body: JSON.stringify({ n, mode }),
+  });
 }
 
 /** Best-effort credit number from /system/status crustdata payload. */

@@ -110,6 +110,11 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: New campaign only opens ⌘K until U3; approvals count badge is "—"; no mock data by design.
 - Evidence: `web/` app; regenerate types with API up: `cd web && npm run gen:api`.
 
+### 2026-10-11 12:05 IST
+- Completed: Frontend connect fix. Command palette crash (`subscribe`) fixed by wrapping `CommandDialog` children in `Command`. Empty/error copy no longer mentions localhost. Campaigns list from `GET /campaigns`; **New campaign** drawer posts `POST /campaigns` + estimate; run page polls `GET /campaigns/{id}`.
+- Tests run: `npm run build` + `npm run lint` clean; API `/campaigns` + `/estimate` smoke OK.
+- Failures remaining: full ICP/email gates in UI still U4/U5; run page is a thin status/stages view.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window
