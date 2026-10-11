@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import format_datetime, make_msgid
 
-_CITATION = re.compile(r"\[ev_[^\]]*\]", re.IGNORECASE)
-_OPT_OUT_MARKERS = ("opt out", "unsubscribe", "reply stop", "stop emailing")
+_OPT_OUT_MARKERS = (
+    "opt out",
+    "unsubscribe",
+    "reply stop",
+    "stop emailing",
+    'reply "stop"',
+    "won't email again",
+    "wont email again",
+)
 
 
 @dataclass
@@ -23,7 +29,10 @@ class ComposedMessage:
 
 
 def strip_citations(text: str) -> str:
-    return _CITATION.sub("", text or "").strip()
+    """Defense-in-depth: remove all evidence-id forms before SMTP."""
+    from app.agents.evidence_refs import strip_refs
+
+    return strip_refs(text or "")
 
 
 def has_opt_out_line(body: str) -> bool:
@@ -58,7 +67,9 @@ def compose(
     if include_postal and postal_address.strip():
         footer_parts.append(postal_address.strip())
     if not has_opt_out_line(clean_body):
-        footer_parts.append("Opt out: reply with unsubscribe and we will not email you again.")
+        footer_parts.append(
+            'If this isn\'t relevant, reply "stop" and I won\'t email again.'
+        )
     if footer_parts:
         clean_body = clean_body.rstrip() + "\n\n--\n" + "\n".join(footer_parts)
 

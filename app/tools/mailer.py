@@ -154,14 +154,8 @@ def send(
 
         # Sandbox demo rewrite
         envelope_to = actual
-        test_prefix = None
         if send_mode == "sandbox" and settings.demo_mode:
             envelope_to = f"{lead_id}@sandbox.local"
-        elif send_mode == "gmail_test":
-            test_prefix = (
-                f"Test send · intended for contact at company "
-                f"({mask_email(to_email)})"
-            )
 
         # Threading
         in_reply_to = None
@@ -201,7 +195,6 @@ def send(
             signature=signature,
             postal_address=postal,
             include_postal=(send_mode == "gmail_live"),
-            test_prefix=test_prefix,
         )
 
         eid = existing["id"] if existing else email_id_for(lead_id, step)

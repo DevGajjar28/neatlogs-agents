@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ActivityPanel } from "@/components/campaign/ActivityPanel";
+import { AddContactDrawer } from "@/components/campaign/AddContactDrawer";
 import { AgentPipeline } from "@/components/campaign/AgentPipeline";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
 import { Mono } from "@/components/common/Mono";
@@ -12,6 +13,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { CardSkeleton } from "@/components/common/Skeletons";
 import { LeadReplyDrawer } from "@/components/mail/LeadReplyDrawer";
 import { PageTitle } from "@/components/shell/page-title";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -42,6 +44,7 @@ export default function CampaignRunPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
+  const [addContactLead, setAddContactLead] = useState<LeadRow | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityAgent, setActivityAgent] = useState<PipelineAgent | null>(null);
 
@@ -126,7 +129,15 @@ export default function CampaignRunPage() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3 rounded-[8px] border border-[var(--border)] bg-[var(--surface)] p-4">
             <div className="min-w-0 flex-1">
-              <h2 className="truncate text-[16px] font-semibold">{q.data.seller_name}</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate text-[16px] font-semibold">{q.data.seller_name}</h2>
+                {q.data.target_mode === "provided" ||
+                q.data.run_facts?.target_mode === "provided" ? (
+                  <span className="rounded-[6px] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text)]">
+                    Your list
+                  </span>
+                ) : null}
+              </div>
               <Mono className="text-[12px] text-[var(--text-muted)]">{q.data.seller_domain}</Mono>
             </div>
             <StatusBadge status={q.data.status} />
@@ -163,12 +174,21 @@ export default function CampaignRunPage() {
               }
             />
           </div>
+          {q.data.run_facts?.template_name ? (
+            <p className="text-[12px] text-[var(--text-muted)]">
+              Email style:{" "}
+              <span className="font-medium text-[var(--text)]">
+                {String(q.data.run_facts.template_name)}
+              </span>
+            </p>
+          ) : null}
 
           <div className="rounded-[8px] border border-[var(--border)] bg-[var(--surface)]">
             <div className="border-b border-[var(--border)] px-4 py-3">
               <h3 className="text-[14px] font-semibold">Leads</h3>
               <p className="text-[12px] text-[var(--text-muted)]">
-                Open a row to edit the email sequence or view replies.
+                Open a row to edit the email sequence. If research finds no person, use Add
+                contact.
               </p>
             </div>
             {(leadsQ.data || []).length === 0 ? (
@@ -188,43 +208,65 @@ export default function CampaignRunPage() {
                       <TableHead className="text-[12px]">Follow-up 2</TableHead>
                       <TableHead className="text-[12px]">Sent</TableHead>
                       <TableHead className="text-[12px]">Status</TableHead>
+                      <TableHead className="text-[12px]"> </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(leadsQ.data || []).map((lead) => (
-                      <TableRow
-                        key={lead.lead_id}
-                        className="cursor-pointer"
-                        onClick={() => setSelectedLead(lead)}
-                      >
-                        <TableCell className="text-[13px]">
-                          {lead.contact_name || "—"}
-                        </TableCell>
-                        <TableCell className="text-[13px]">{lead.company_name}</TableCell>
-                        <TableCell>
-                          <Mono className="text-[12px]">{lead.email_masked || "—"}</Mono>
-                        </TableCell>
-                        <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
-                          {truncate(lead.email_1_subject)}
-                        </TableCell>
-                        <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
-                          {truncate(lead.followup_1_subject)}
-                        </TableCell>
-                        <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
-                          {truncate(lead.followup_2_subject)}
-                        </TableCell>
-                        <TableCell className="text-[12px]">
-                          {lead.sent_at ? (
-                            <RelativeTime value={lead.sent_at} />
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={lead.status} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {(leadsQ.data || []).map((lead) => {
+                      const noContact = lead.status === "no_contact";
+                      return (
+                        <TableRow
+                          key={lead.lead_id}
+                          className={noContact ? undefined : "cursor-pointer"}
+                          onClick={() => {
+                            if (!noContact) setSelectedLead(lead);
+                          }}
+                        >
+                          <TableCell className="text-[13px]">
+                            {noContact ? (
+                              <span className="text-[var(--status-warning)]">Not found</span>
+                            ) : (
+                              lead.contact_name || "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="text-[13px]">{lead.company_name}</TableCell>
+                          <TableCell>
+                            <Mono className="text-[12px]">{lead.email_masked || "—"}</Mono>
+                          </TableCell>
+                          <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
+                            {truncate(lead.email_1_subject)}
+                          </TableCell>
+                          <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
+                            {truncate(lead.followup_1_subject)}
+                          </TableCell>
+                          <TableCell className="max-w-[140px] truncate text-[12px] text-[var(--text-muted)]">
+                            {truncate(lead.followup_2_subject)}
+                          </TableCell>
+                          <TableCell className="text-[12px]">
+                            {lead.sent_at ? (
+                              <RelativeTime value={lead.sent_at} />
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={lead.status} />
+                          </TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            {noContact && lead.company_id ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => setAddContactLead(lead)}
+                              >
+                                + Add contact
+                              </Button>
+                            ) : null}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -239,6 +281,13 @@ export default function CampaignRunPage() {
         lead={selectedLead}
         reply={selectedReply}
         campaignId={id}
+      />
+      <AddContactDrawer
+        open={Boolean(addContactLead)}
+        onOpenChange={(o) => !o && setAddContactLead(null)}
+        campaignId={id}
+        lead={addContactLead}
+        onCreated={(row) => setSelectedLead(row)}
       />
 
       <ActivityPanel

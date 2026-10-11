@@ -277,6 +277,261 @@ def icp_gate_node(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def buyer_import_node(state: dict[str, Any]) -> dict[str, Any]:
+    """Resolve user-provided company domains via free company/identify (cached)."""
+    campaign_id = state["campaign_id"]
+    inp = state.get("input") or {}
+    provided = list(inp.get("provided_companies") or [])
+    events = EventBag(state, "buyer_finder")
+    errors = list(state.get("errors") or [])
+    extras = dict(state.get("extras") or {})
+    n = max(1, min(int(inp.get("n") or len(provided) or 10), 50))
+    spent = float((state.get("budget") or {}).get("credits_spent") or 0)
+
+    from app.infra.events import set_stage
+
+    # Your-list path never runs ICP propose/gate — mark icp skipped for the pipeline.
+    if campaign_id:
+        set_stage(str(campaign_id), "icp", "skipped")
+
+    events.append({"type": "buyers.import_started", "n": len(provided)})
+    if not provided:
+        events.append(
+            {
+                "type": "buyers.import_done",
+                "matched": 0,
+                "n": 0,
+            }
+        )
+        extras["target_mode"] = "provided"
+        return {
+            "companies": [],
+            "events": events,
+            "errors": errors,
+            "extras": extras,
+            "plan": set_plan_phase(state, "after_search"),
+            "budget": {"credits_spent": spent},
+        }
+
+    client = client_for_campaign(state)
+    matched_companies: list[Company] = []
+    not_found: list[dict[str, Any]] = list(extras.get("import_not_found") or [])
+    already_ids = {str(c.get("id")) for c in (state.get("companies") or []) if isinstance(c, dict)}
+    pool: list[Company] = []
+
+    try:
+        # Batch identify by domain (max 25 per call); free + cached.
+        batches: list[list[dict[str, str]]] = []
+        batch: list[dict[str, str]] = []
+        for row in provided:
+            if not isinstance(row, dict):
+                continue
+            domain = str(row.get("domain") or "").strip().lower()
+            if not domain:
+                continue
+            batch.append(
+                {
+                    "name": str(row.get("name") or domain),
+                    "domain": domain,
+                    "description": str(row.get("description") or "")[:300],
+                }
+            )
+            if len(batch) >= 25:
+                batches.append(batch)
+                batch = []
+        if batch:
+            batches.append(batch)
+
+        for group in batches:
+            domains = [r["domain"] for r in group]
+            by_domain = {r["domain"]: r for r in group}
+            try:
+                payload = client.company_identify(
+                    {"domains": domains},
+                    campaign_id=campaign_id,
+                    step="buyers.import_identify",
+                )
+            except CrustdataError as exc:
+                errors.append({"step": "buyer_import", "error": str(exc)})
+                for r in group:
+                    not_found.append({"domain": r["domain"], "name": r["name"], "reason": str(exc)})
+                    events.append(
+                        {
+                            "type": "buyers.import_not_found",
+                            "domain": r["domain"],
+                            "company": r["name"],
+                        }
+                    )
+                continue
+
+            resolved = _identify_by_domain(payload)
+            for domain, row in by_domain.items():
+                hit = resolved.get(domain)
+                if not hit:
+                    not_found.append(
+                        {"domain": domain, "name": row["name"], "reason": "not_found"}
+                    )
+                    events.append(
+                        {
+                            "type": "buyers.import_not_found",
+                            "domain": domain,
+                            "company": row["name"],
+                        }
+                    )
+                    continue
+                cid = str(hit.get("id") or "")
+                if not cid or cid in already_ids:
+                    if not cid:
+                        not_found.append(
+                            {"domain": domain, "name": row["name"], "reason": "no_id"}
+                        )
+                        events.append(
+                            {
+                                "type": "buyers.import_not_found",
+                                "domain": domain,
+                                "company": row["name"],
+                            }
+                        )
+                    continue
+                already_ids.add(cid)
+                company = Company(
+                    id=cid,
+                    name=str(hit.get("name") or row["name"]),
+                    domain=domain,
+                    industry=hit.get("industry"),
+                    headcount=hit.get("headcount"),
+                    country=hit.get("country"),
+                    fit_score=1.0,
+                    fit_reasons=["user_list"],
+                    status="kept",
+                )
+                matched_companies.append(company)
+                events.append(
+                    {
+                        "type": "buyers.import_matched",
+                        "company": company.name,
+                        "domain": domain,
+                    }
+                )
+                # Attach user description for account researcher context
+                extras.setdefault("user_list_context", {})[cid] = {
+                    "description": row["description"],
+                    "source": "user_list",
+                    "domain": domain,
+                }
+
+        # Cap kept to n (user may paste more than target)
+        kept = matched_companies[:n]
+        for c in matched_companies[n:]:
+            c.status = "dropped"
+            c.drop_reason = "below_top_n"
+        pool = kept + matched_companies[n:]
+        events.append(
+            {
+                "type": "buyers.import_done",
+                "matched": len(kept),
+                "n": len(provided),
+            }
+        )
+        extras["import_not_found"] = not_found
+        extras["target_mode"] = "provided"
+        spent = client.ledger.spent(campaign_id)
+    finally:
+        client.close()
+
+    return {
+        "companies": [c.model_dump(mode="json") for c in pool],
+        "events": events,
+        "errors": errors,
+        "extras": extras,
+        "budget": {"credits_spent": spent},
+        "plan": set_plan_phase(state, "after_search"),
+    }
+
+
+def _identify_by_domain(payload: Any) -> dict[str, dict[str, Any]]:
+    """Map domain → {id, name, industry, headcount, country} from identify response."""
+    from app.agents.product_researcher import _first_company_data
+
+    out: dict[str, dict[str, Any]] = {}
+    rows: list[dict] = []
+    if isinstance(payload, list):
+        rows = [r for r in payload if isinstance(r, dict)]
+    elif isinstance(payload, dict):
+        rows = [payload] if "matches" in payload or "matched_on" in payload else []
+        if not rows:
+            rows = [
+                r
+                for r in (payload.get("companies") or payload.get("results") or [])
+                if isinstance(r, dict)
+            ]
+
+    for row in rows:
+        matched_on = str(row.get("matched_on") or row.get("domain") or "").strip().lower()
+        if matched_on.startswith("www."):
+            matched_on = matched_on[4:]
+        matches = row.get("matches") or []
+        best = None
+        best_conf = -1.0
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            conf = match.get("confidence_score")
+            conf_f = float(conf) if conf is not None else 0.5
+            if conf_f > best_conf:
+                best_conf = conf_f
+                best = match
+        if not best and isinstance(row.get("company_data"), dict):
+            best = {"company_data": row["company_data"], "confidence_score": 1.0}
+        if not best:
+            continue
+        data = best.get("company_data") or best
+        if not isinstance(data, dict):
+            continue
+        basic = data.get("basic_info") or {}
+        cid = data.get("crustdata_company_id") or basic.get("crustdata_company_id")
+        domain = (
+            matched_on
+            or str(basic.get("primary_domain") or data.get("primary_domain") or "").lower()
+        )
+        if domain.startswith("www."):
+            domain = domain[4:]
+        if not cid or not domain:
+            continue
+        out[domain] = {
+            "id": cid,
+            "name": basic.get("name") or data.get("name"),
+            "industry": (basic.get("industries") or [None])[0]
+            if isinstance(basic.get("industries"), list)
+            else basic.get("industry"),
+            "headcount": (data.get("headcount") or {}).get("total")
+            if isinstance(data.get("headcount"), dict)
+            else None,
+            "country": None,
+        }
+        locs = data.get("locations") or basic.get("locations") or {}
+        if isinstance(locs, dict):
+            out[domain]["country"] = locs.get("country")
+    # Fallback: single-id response without matched_on
+    if not out:
+        data = _first_company_data(payload)
+        if data:
+            basic = data.get("basic_info") or {}
+            domain = str(basic.get("primary_domain") or "").lower()
+            cid = data.get("crustdata_company_id") or basic.get("crustdata_company_id")
+            if domain and cid:
+                if domain.startswith("www."):
+                    domain = domain[4:]
+                out[domain] = {
+                    "id": cid,
+                    "name": basic.get("name"),
+                    "industry": None,
+                    "headcount": None,
+                    "country": None,
+                }
+    return out
+
+
 def buyer_search_node(state: dict[str, Any]) -> dict[str, Any]:
     """Search lookalikes with approved ICP; overfetch 3xN; score; keep top N."""
     campaign_id = state["campaign_id"]

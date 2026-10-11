@@ -17,6 +17,7 @@ const STATUS_MAP: Record<string, { tone: StatusTone; label: string }> = {
   verified: { tone: "success", label: "Verified" },
   waiting_icp: { tone: "warning", label: "Waiting for you" },
   waiting_approval: { tone: "warning", label: "Waiting for you" },
+  awaiting_approval: { tone: "warning", label: "Waiting for you" },
   guessed: { tone: "warning", label: "Guessed" },
   redrafted: { tone: "warning", label: "Redrafted" },
   recovered: { tone: "warning", label: "Recovered" },
@@ -34,6 +35,7 @@ const STATUS_MAP: Record<string, { tone: StatusTone; label: string }> = {
   skipped: { tone: "neutral", label: "Skipped" },
   cancelled: { tone: "neutral", label: "Cancelled" },
   paused: { tone: "neutral", label: "Paused" },
+  no_contact: { tone: "warning", label: "Not found" },
 };
 
 type StatusBadgeProps = {

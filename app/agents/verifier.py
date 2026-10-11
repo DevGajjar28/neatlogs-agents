@@ -8,9 +8,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.agents.evidence_refs import find_refs, strip_refs
+from app.infra.events import EventBag
 from app.llm import get_llm
 from app.models import AccountBrief, Contact, EmailDraft, EvidenceCard, SellerBrief, VerifierResult
-from app.infra.events import EventBag
 
 BANNED = ("guaranteed", "100%", "no risk", "act now", "limited time", "congratulations")
 INJECTION_HINTS = (
@@ -196,15 +197,34 @@ def verify_draft(
     issues: list[str] = []
     unsupported: list[str] = []
     stale: list[str] = []
+    body_low = draft.body.lower()
+
+    # 0) Internal evidence ids must never appear in outbound copy
+    if find_refs(f"{draft.subject}\n{draft.body}"):
+        issues.append("internal_ref")
 
     # 1) cited ids exist
     for eid in draft.cited_evidence_ids:
         if eid not in by_id:
             issues.append(f"unknown_citation:{eid}")
 
+    # 1b) Structured claims: text must appear in body; ids must exist
+    for claim in draft.claims or []:
+        phrase = (claim.text or "").strip()
+        if not phrase:
+            continue
+        if phrase.lower() not in body_low:
+            issues.append(f"claim_missing_from_body:{phrase[:40]}")
+        for eid in claim.evidence_ids:
+            if eid not in by_id:
+                issues.append(f"unknown_citation:{eid}")
+            else:
+                if eid not in draft.cited_evidence_ids:
+                    # keep cited list in sync for downstream
+                    pass
+
     # 2) stale "recent" claims
     cutoff = date_days_ago(90)
-    body_low = draft.body.lower()
     claims_recent = any(w in body_low for w in ("recent", "this week", "today", "just announced", "why now"))
     for eid in draft.cited_evidence_ids:
         card = by_id.get(eid)
@@ -216,14 +236,11 @@ def verify_draft(
 
     # 3) name/title/company consistency (soft)
     if contact.name and contact.name.split()[0].lower() not in body_low and contact.name.lower() not in body_low:
-        # Allow not addressing by name, but block wrong first name
         pass
     for token in re.findall(r"\b[A-Z][a-z]+\b", draft.body):
         if token.lower() in {"opt", "subject", "hi", "hello", "thanks"}:
             continue
-    # Block if draft invents a different person name clearly
     if "dear " in body_low:
-        # crude: after dear, expect contact first name
         pass
 
     # 5/6) injection residue, length, opt-out, banned
@@ -234,13 +251,20 @@ def verify_draft(
     max_words = 120 if draft.step == 1 else 70
     if len(words) > max_words + 15:  # small slack for opt-out line
         issues.append(f"too_long:{len(words)}>{max_words}")
-    if "opt-out" not in body_low and "opt out" not in body_low and "unsubscribe" not in body_low:
+    if (
+        "opt-out" not in body_low
+        and "opt out" not in body_low
+        and "unsubscribe" not in body_low
+        and 'reply "stop"' not in body_low
+        and "won't email again" not in body_low
+        and "wont email again" not in body_low
+    ):
         issues.append("missing_opt_out")
     for phrase in BANNED:
         if phrase in body_low:
             issues.append(f"banned_phrase:{phrase}")
 
-    # 4) LLM judge for factual support
+    # 4) LLM judge for factual support (also covers sentences without claims)
     if use_llm and not issues:
         judge = _llm_judge(draft, evidence, contact)
         if not judge.passed:
@@ -250,7 +274,12 @@ def verify_draft(
     passed = not issues and not unsupported and not stale
     if passed:
         action: Literal["pass", "redraft", "downgrade", "drop"] = "pass"
-    elif any(i.startswith("unknown_citation") or i.startswith("injection") for i in issues):
+    elif any(
+        i.startswith("unknown_citation")
+        or i.startswith("injection")
+        or i == "internal_ref"
+        for i in issues
+    ):
         action = "redraft"
     elif stale or unsupported:
         action = "downgrade"
@@ -289,23 +318,38 @@ def _llm_judge(draft: EmailDraft, evidence: list[EvidenceCard], contact: Contact
 
 def _downgrade_draft(draft: EmailDraft, evidence: list[EvidenceCard]) -> EmailDraft:
     """Remove sentences that reference unknown/stale ids; keep opt-out."""
+    from app.agents.email_writer import OPT_OUT
+
     allowed = {e.id for e in evidence}
     lines = []
     for line in draft.body.splitlines():
-        ids = re.findall(r"ev_[a-f0-9]+", line, flags=re.I)
+        ids = find_refs(line)
         if ids and any(i not in allowed for i in ids):
             continue
-        lines.append(line)
+        lines.append(strip_refs(line))
     body = "\n".join(lines).strip()
-    if "opt-out" not in body.lower() and "opt out" not in body.lower():
-        body = body + "\n\nOpt out: reply stop and I will not email again."
+    body = strip_refs(body)
+    low = body.lower()
+    if (
+        "opt-out" not in low
+        and "opt out" not in low
+        and "unsubscribe" not in low
+        and 'reply "stop"' not in low
+    ):
+        body = body + "\n\n" + OPT_OUT
     cited = [i for i in draft.cited_evidence_ids if i in allowed]
+    claims = [
+        c
+        for c in (draft.claims or [])
+        if all(eid in allowed for eid in c.evidence_ids) and c.text.lower() in body.lower()
+    ]
     return EmailDraft(
         step=draft.step,
-        subject=draft.subject,
+        subject=strip_refs(draft.subject),
         body=body,
         cited_evidence_ids=cited or list(allowed)[:1],
         send_after_days=draft.send_after_days,
+        claims=claims,
     )
 
 

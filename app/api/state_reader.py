@@ -79,3 +79,14 @@ def update_drafts(campaign_id: str, drafts: dict[str, Any]) -> None:
     finally:
         conn.close()
     invalidate(campaign_id)
+
+
+def update_values(campaign_id: str, patch: dict[str, Any]) -> None:
+    """Merge fields into the LangGraph checkpoint and invalidate cache."""
+    conn, checkpointer = open_checkpointer()
+    try:
+        graph = build_graph(checkpointer)
+        graph.update_state(run_config(campaign_id), patch)
+    finally:
+        conn.close()
+    invalidate(campaign_id)

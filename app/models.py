@@ -67,7 +67,7 @@ class Contact(BaseModel):
     title: str
     role_kind: Literal["economic_buyer", "champion", "user"]
     email: str | None
-    email_source: Literal["crustdata", "crustdata_realtime", "pattern_guess", "none"]
+    email_source: Literal["crustdata", "crustdata_realtime", "pattern_guess", "user", "none"]
     email_confidence: Literal["verified", "likely", "guessed", "none"]
     profile_url: str | None
 
@@ -79,12 +79,18 @@ class AccountBrief(BaseModel):
     evidence: list[EvidenceCard]
 
 
+class DraftClaim(BaseModel):
+    text: str  # exact phrase from body (no evidence ids)
+    evidence_ids: list[str]
+
+
 class EmailDraft(BaseModel):
     step: Literal[1, 2, 3]  # first + 2 follow-ups
     subject: str
     body: str
     cited_evidence_ids: list[str]
     send_after_days: int  # 0, 3, 7 (demo: minutes)
+    claims: list[DraftClaim] = []
 
 
 class VerifierResult(BaseModel):

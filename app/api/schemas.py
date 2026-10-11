@@ -39,6 +39,20 @@ class PipelineOut(BaseModel):
     agents: list[PipelineAgentOut] = Field(default_factory=list)
 
 
+class EvidenceWhyOut(BaseModel):
+    id: str
+    fact: str
+    source_type: str | None = None
+    source_ref: str | None = None
+    observed_at: str | None = None
+
+
+class DraftClaimOut(BaseModel):
+    text: str
+    evidence_ids: list[str] = Field(default_factory=list)
+    evidence: list[EvidenceWhyOut] = Field(default_factory=list)
+
+
 class PendingApprovalItem(BaseModel):
     contact_id: str
     lead_id: str | None = None
@@ -50,6 +64,9 @@ class PendingApprovalItem(BaseModel):
     subject: str | None = None
     body: str | None = None
     guessed: bool = False
+    has_internal_refs: bool = False
+    claims: list[DraftClaimOut] = Field(default_factory=list)
+    style_warnings: list[str] = Field(default_factory=list)
 
 
 class PendingApprovalsOut(BaseModel):
@@ -80,6 +97,7 @@ class CampaignSummary(BaseModel):
     credits_spent: float = 0.0
     credit_cap: float = 400.0
     mode: Literal["replay", "live"] = "replay"
+    target_mode: Literal["discover", "provided"] = "discover"
     started_at: datetime | None = None
     trace_url: str | None = None
 
@@ -107,6 +125,7 @@ class EventOut(BaseModel):
 
 class LeadRow(BaseModel):
     lead_id: str
+    company_id: str | None = None
     company_name: str
     company_domain: str
     contact_name: str | None = None
@@ -130,6 +149,14 @@ class LeadRow(BaseModel):
     email_1_editable: bool = True
     followup_1_editable: bool = True
     followup_2_editable: bool = True
+    claims: list[DraftClaimOut] = Field(default_factory=list)
+    has_internal_refs: bool = False
+
+
+class ManualContactIn(BaseModel):
+    name: str
+    title: str = "Contact"
+    email: str
 
 
 class LeadSequenceStepIn(BaseModel):
@@ -154,11 +181,17 @@ class LeadDetail(BaseModel):
     audit: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ProvidedCompanyIn(BaseModel):
+    name: str
+    domain: str
+    description: str = ""
+
+
 class CreateCampaignIn(BaseModel):
     company_name: str
     website: str
     description: str = ""
-    n: int = Field(default=10, ge=5, le=50)
+    n: int = Field(default=10, ge=1, le=50)
     mode: Literal["replay", "live"] = "replay"
     cap: float | None = None
     chaos: str = ""
@@ -167,11 +200,82 @@ class CreateCampaignIn(BaseModel):
     mail_account_id: str | None = None
     send_mode: Literal["sandbox", "gmail_drafts", "gmail_test", "gmail_live"] = "sandbox"
     live_confirm_email: str | None = None
+    target_mode: Literal["discover", "provided"] = "discover"
+    provided_companies: list[ProvidedCompanyIn] = Field(default_factory=list)
+    template_id: str | None = None
+
+
+class EmailTemplateOut(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    content_md: str
+    is_default: bool = False
+    is_system: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class EmailTemplateCreateIn(BaseModel):
+    name: str
+    description: str = ""
+    content_md: str = Field(..., max_length=8000)
+
+
+class EmailTemplateUpdateIn(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    content_md: str | None = Field(default=None, max_length=8000)
+
+
+class EmailTemplatePreviewIn(BaseModel):
+    campaign_id: str | None = None
+    contact_id: str | None = None
+
+
+class EmailTemplatePreviewStepOut(BaseModel):
+    step: int
+    subject: str
+    body: str
+    claims: list[dict[str, Any]] = Field(default_factory=list)
+    style_warnings: list[str] = Field(default_factory=list)
+
+
+class EmailTemplatePreviewOut(BaseModel):
+    preview: bool = True
+    template_id: str
+    template_name: str
+    campaign_id: str
+    contact_id: str
+    contact_name: str | None = None
+    company_name: str | None = None
+    steps: list[EmailTemplatePreviewStepOut] = Field(default_factory=list)
+    verifier: dict[str, Any] = Field(default_factory=dict)
+    prompt_contains_system_rules: bool = True
+    crustdata_calls: int = 0
+
+
+class ParseCompaniesIn(BaseModel):
+    csv_text: str = ""
+
+
+class ParseCompaniesRowOut(BaseModel):
+    name: str = ""
+    domain: str = ""
+    description: str = ""
+    status: str
+    reason: str = ""
+
+
+class ParseCompaniesOut(BaseModel):
+    rows: list[ParseCompaniesRowOut] = Field(default_factory=list)
+    ok_count: int = 0
 
 
 class EstimateIn(BaseModel):
     n: int = Field(ge=1, le=50)
     mode: Literal["replay", "live"] = "live"
+    target_mode: Literal["discover", "provided"] = "discover"
 
 
 class EstimateOut(BaseModel):

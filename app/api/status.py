@@ -5,9 +5,31 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.api.runs import HEARTBEAT_STALE_S, is_alive
-from app.api.state_reader import pending_interrupt
+from app.api.state_reader import get_values, pending_interrupt
 from app.config import get_settings
 from app.infra.db import connect, init_db
+
+
+def _has_pending_email_approvals(campaign_id: str) -> bool:
+    """True when drafts are ready for human approve/send without a live interrupt."""
+    try:
+        values = get_values(campaign_id)
+    except Exception:  # noqa: BLE001
+        return False
+    extras = values.get("extras") or {}
+    cached = extras.get("pending_email_approval")
+    if isinstance(cached, dict) and cached.get("items"):
+        return True
+    already = dict(extras.get("email_approvals") or {})
+    drafts = values.get("drafts") or {}
+    verifier = values.get("verifier") or {}
+    for contact_id, _seq in drafts.items():
+        if already.get(contact_id, {}).get("approved") is True:
+            continue
+        v = verifier.get(contact_id) or {}
+        if v.get("passed") or v.get("action") in {"pass", "downgrade"}:
+            return True
+    return False
 
 
 def campaign_status(campaign_id: str) -> str:
@@ -46,7 +68,12 @@ def campaign_status(campaign_id: str) -> str:
                     status = "waiting_icp"
                 elif payload and payload.get("type") == "email_approval":
                     status = "waiting_approval"
-                elif stored in {"completed", "halted", "failed", "queued", "waiting_icp", "waiting_approval"}:
+                elif stored == "waiting_approval":
+                    status = "waiting_approval"
+                elif _has_pending_email_approvals(campaign_id):
+                    # Manual contact drafts after a finished run (no graph interrupt)
+                    status = "waiting_approval"
+                elif stored in {"completed", "halted", "failed", "queued", "waiting_icp"}:
                     status = stored
                 elif run and run["exit_code"] not in (None, 0):
                     status = "failed"

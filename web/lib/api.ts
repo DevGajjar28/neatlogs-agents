@@ -129,8 +129,28 @@ export type CampaignSummary = {
   credits_spent: number;
   credit_cap: number;
   mode: "replay" | "live";
+  target_mode?: "discover" | "provided";
   started_at?: string | null;
   trace_url?: string | null;
+};
+
+export type ProvidedCompany = {
+  name: string;
+  domain: string;
+  description?: string;
+};
+
+export type ParseCompaniesRow = {
+  name: string;
+  domain: string;
+  description: string;
+  status: string;
+  reason: string;
+};
+
+export type ParseCompaniesOut = {
+  rows: ParseCompaniesRow[];
+  ok_count: number;
 };
 
 export type CampaignDetail = CampaignSummary & {
@@ -164,6 +184,9 @@ export type CreateCampaignInput = {
   mail_account_id?: string | null;
   send_mode?: SendMode;
   live_confirm_email?: string | null;
+  target_mode?: "discover" | "provided";
+  provided_companies?: ProvidedCompany[];
+  template_id?: string | null;
 };
 
 export type MailAccount = {
@@ -272,8 +295,23 @@ export type ReplyRow = {
   open_in_gmail_url?: string | null;
 };
 
+export type EvidenceWhy = {
+  id: string;
+  fact: string;
+  source_type?: string | null;
+  source_ref?: string | null;
+  observed_at?: string | null;
+};
+
+export type DraftClaim = {
+  text: string;
+  evidence_ids: string[];
+  evidence?: EvidenceWhy[];
+};
+
 export type LeadRow = {
   lead_id: string;
+  company_id?: string | null;
   company_name: string;
   company_domain: string;
   contact_name?: string | null;
@@ -297,6 +335,8 @@ export type LeadRow = {
   email_1_editable?: boolean;
   followup_1_editable?: boolean;
   followup_2_editable?: boolean;
+  claims?: DraftClaim[];
+  has_internal_refs?: boolean;
 };
 
 export type PipelineAgent = {
@@ -340,6 +380,40 @@ export type PendingApprovalItem = {
   subject?: string | null;
   body?: string | null;
   guessed?: boolean;
+  has_internal_refs?: boolean;
+  claims?: DraftClaim[];
+  style_warnings?: string[];
+};
+
+export type EmailTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  content_md: string;
+  is_default: boolean;
+  is_system: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type EmailTemplatePreview = {
+  preview: boolean;
+  template_id: string;
+  template_name: string;
+  campaign_id: string;
+  contact_id: string;
+  contact_name?: string | null;
+  company_name?: string | null;
+  steps: {
+    step: number;
+    subject: string;
+    body: string;
+    claims?: DraftClaim[];
+    style_warnings?: string[];
+  }[];
+  verifier?: Record<string, unknown>;
+  prompt_contains_system_rules?: boolean;
+  crustdata_calls?: number;
 };
 
 export type PendingApprovalsOut = {
@@ -465,6 +539,17 @@ export function listCampaignLeads(campaignId: string) {
   return api<LeadRow[]>(`/campaigns/${encodeURIComponent(campaignId)}/leads`);
 }
 
+export function addManualContact(
+  campaignId: string,
+  companyId: string,
+  body: { name: string; title?: string; email: string },
+) {
+  return api<LeadRow>(
+    `/campaigns/${encodeURIComponent(campaignId)}/companies/${encodeURIComponent(companyId)}/contact`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
 export function getCampaignPipeline(campaignId: string) {
   return api<PipelineOut>(`/campaigns/${encodeURIComponent(campaignId)}/pipeline`);
 }
@@ -521,11 +606,81 @@ export function patchLeadSequence(
   );
 }
 
-export function estimateCampaign(n: number, mode: "replay" | "live") {
+export function estimateCampaign(
+  n: number,
+  mode: "replay" | "live",
+  target_mode: "discover" | "provided" = "discover",
+) {
   return api<EstimateOut>("/estimate", {
     method: "POST",
-    body: JSON.stringify({ n, mode }),
+    body: JSON.stringify({ n, mode, target_mode }),
   });
+}
+
+export function parseCompaniesCsv(csv_text: string) {
+  return api<ParseCompaniesOut>("/campaigns/parse-companies", {
+    method: "POST",
+    body: JSON.stringify({ csv_text }),
+  });
+}
+
+export function listEmailTemplates() {
+  return api<EmailTemplate[]>("/email-templates");
+}
+
+export function getEmailTemplate(id: string) {
+  return api<EmailTemplate>(`/email-templates/${encodeURIComponent(id)}`);
+}
+
+export function createEmailTemplate(body: {
+  name: string;
+  description?: string;
+  content_md: string;
+}) {
+  return api<EmailTemplate>("/email-templates", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateEmailTemplate(
+  id: string,
+  body: { name?: string; description?: string; content_md?: string },
+) {
+  return api<EmailTemplate>(`/email-templates/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteEmailTemplate(id: string) {
+  return api<void>(`/email-templates/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export function duplicateEmailTemplate(id: string) {
+  return api<EmailTemplate>(
+    `/email-templates/${encodeURIComponent(id)}/duplicate`,
+    { method: "POST", body: "{}" },
+  );
+}
+
+export function setDefaultEmailTemplate(id: string) {
+  return api<EmailTemplate>(
+    `/email-templates/${encodeURIComponent(id)}/default`,
+    { method: "PUT", body: "{}" },
+  );
+}
+
+export function previewEmailTemplate(
+  id: string,
+  body: { campaign_id?: string | null; contact_id?: string | null } = {},
+) {
+  return api<EmailTemplatePreview>(
+    `/email-templates/${encodeURIComponent(id)}/preview`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
 }
 
 /** Best-effort credit number from /system/status crustdata payload. */

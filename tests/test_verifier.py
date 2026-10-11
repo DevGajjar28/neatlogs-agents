@@ -57,9 +57,12 @@ def test_verify_draft_rejects_missing_opt_out_then_pass():
     bad = EmailDraft(
         step=1,
         subject="Idea",
-        body="Ada, Acme uses product analytics [ev_aaa111]. Let's chat.",
+        body="Ada, Acme uses product analytics. Let's chat.",
         cited_evidence_ids=["ev_aaa111"],
         send_after_days=0,
+        claims=[
+            {"text": "Acme uses product analytics", "evidence_ids": ["ev_aaa111"]},
+        ],
     )
     r1 = verify_draft(bad, evidence=evidence, contact=contact, use_llm=False)
     assert r1.passed is False
@@ -69,9 +72,12 @@ def test_verify_draft_rejects_missing_opt_out_then_pass():
     good = EmailDraft(
         step=1,
         subject="Idea",
-        body=f"Ada, Acme uses product analytics [ev_aaa111].\n\n{OPT_OUT}",
+        body=f"Ada, Acme uses product analytics.\n\n{OPT_OUT}",
         cited_evidence_ids=["ev_aaa111"],
         send_after_days=0,
+        claims=[
+            {"text": "Acme uses product analytics", "evidence_ids": ["ev_aaa111"]},
+        ],
     )
     r2 = verify_draft(good, evidence=evidence, contact=contact, use_llm=False)
     assert r2.passed is True

@@ -13,6 +13,7 @@ VALID_KILL_NODES = frozenset(
         "buyer_propose_icp",
         "icp_gate",
         "buyer_search",
+        "buyer_import",
         "account_enrich",
         "account_company",
         "account_join",

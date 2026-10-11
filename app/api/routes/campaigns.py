@@ -26,6 +26,10 @@ from app.api.schemas import (
     LeadDetail,
     LeadRow,
     LeadSequencePatchIn,
+    ManualContactIn,
+    ParseCompaniesIn,
+    ParseCompaniesOut,
+    ParseCompaniesRowOut,
     PendingApprovalItem,
     PendingApprovalsOut,
     PipelineOut,
@@ -38,7 +42,9 @@ from app.config import get_settings
 from app.infra.audit import write_audit
 from app.infra.budget import BudgetLedger, estimate_campaign
 from app.infra.chaos import ChaosConfigError, ChaosController
+from app.infra.company_list import parse_companies_csv, validate_provided_companies
 from app.infra.db import connect, init_db
+from app.infra.email_templates import snapshot_for_campaign
 from app.infra.redact import mask_email
 from app.mail import accounts as mail_accounts
 from app.mail.policy import mode_allowed
@@ -97,6 +103,9 @@ def _summary(row: Any) -> CampaignSummary:
         conn.close()
     status = campaign_status(cid)
     traces = settings.neatlogs_traces_url or (run["trace_url"] if run else None)
+    target_mode = str(opts.get("target_mode") or inp.get("target_mode") or "discover")
+    if target_mode not in {"discover", "provided"}:
+        target_mode = "discover"
     return CampaignSummary(
         id=cid,
         seller_name=row["seller_name"] or inp.get("company_name") or "",
@@ -109,6 +118,7 @@ def _summary(row: Any) -> CampaignSummary:
         credits_spent=spent,
         credit_cap=float(opts.get("cap") or settings.max_credits),
         mode=opts.get("mode") or inp.get("mode") or settings.data_mode,  # type: ignore[arg-type]
+        target_mode=target_mode,  # type: ignore[arg-type]
         started_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
         trace_url=traces,
     )
@@ -128,6 +138,15 @@ def list_campaigns() -> list[CampaignSummary]:
     return [_summary(r) for r in rows]
 
 
+@router.post("/campaigns/parse-companies", response_model=ParseCompaniesOut)
+def parse_companies(body: ParseCompaniesIn) -> ParseCompaniesOut:
+    parsed = parse_companies_csv(body.csv_text or "")
+    return ParseCompaniesOut(
+        rows=[ParseCompaniesRowOut(**r) for r in parsed.get("rows") or []],
+        ok_count=int(parsed.get("ok_count") or 0),
+    )
+
+
 @router.post("/campaigns", response_model=CampaignSummary, status_code=201)
 def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
     settings = get_settings()
@@ -135,7 +154,22 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
     parsed = urlparse(body.website)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(422, detail="website must be an http(s) URL")
-    est = estimate_campaign(body.n, body.mode)
+
+    target_mode = body.target_mode or "discover"
+    provided: list[dict[str, str]] = []
+    n = int(body.n)
+    if target_mode == "provided":
+        try:
+            provided = validate_provided_companies(
+                [c.model_dump() for c in body.provided_companies]
+            )
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        n = len(provided)
+    elif n < 5:
+        raise HTTPException(422, detail="n must be between 5 and 50 for discover mode")
+
+    est = estimate_campaign(n, body.mode, target_mode=target_mode)
     cap = float(body.cap if body.cap is not None else settings.max_credits)
     if body.mode == "live" and cap < float(est["total"]):
         raise HTTPException(
@@ -175,8 +209,12 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
         live_confirm_ok = True
 
     cid = f"ui-{uuid.uuid4().hex[:10]}"
+    try:
+        tpl_snap = snapshot_for_campaign(body.template_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(422, detail=f"email template: {exc}") from exc
     options = {
-        "n": body.n,
+        "n": n,
         "mode": body.mode,
         "cap": cap,
         "chaos": chaos,
@@ -184,13 +222,18 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
         "send_mode": send_mode,
         "mail_account_id": mail_account_id,
         "live_confirm_ok": live_confirm_ok,
+        "target_mode": target_mode,
+        "provided_companies": provided,
+        "template_id": tpl_snap["template_id"],
+        "template_name": tpl_snap["template_name"],
+        "template_snapshot": tpl_snap["template_snapshot"],
     }
     ensure_campaign_row(
         cid,
         company_name=body.company_name,
         website=body.website,
         description=body.description,
-        n=body.n,
+        n=n,
         mode=body.mode,
         options=options,
         status="queued",
@@ -286,6 +329,9 @@ def get_campaign(campaign_id: str) -> CampaignDetail:
             "send_mode": send_mode,
             "mail_account_id": mail_account_id,
             "mail_account_label": mail_label,
+            "target_mode": opts.get("target_mode") or base.target_mode,
+            "template_id": opts.get("template_id"),
+            "template_name": opts.get("template_name"),
         },
         is_alive=run_manager.is_alive(campaign_id),
         can_resume=can_resume(campaign_id),
@@ -307,32 +353,156 @@ def get_pipeline(campaign_id: str) -> PipelineOut:
     return campaign_pipeline(campaign_id)
 
 
+def _build_email_approval_payload(campaign_id: str) -> dict[str, Any] | None:
+    """Build approval queue from checkpoint drafts (interrupt or post-run manual contacts)."""
+    from app.tools.mailer import lead_id_for
+
+    values = state_reader.get_values(campaign_id)
+    extras = values.get("extras") or {}
+    cached = extras.get("pending_email_approval")
+    if isinstance(cached, dict) and cached.get("type") == "email_approval" and cached.get("items"):
+        return cached
+
+    contacts = {c["id"]: c for c in (values.get("contacts") or []) if isinstance(c, dict)}
+    drafts = values.get("drafts") or {}
+    verifier = values.get("verifier") or {}
+    already = dict(extras.get("email_approvals") or {})
+    items: list[dict[str, Any]] = []
+    for contact_id, sequence in drafts.items():
+        if already.get(contact_id, {}).get("approved") is True:
+            continue
+        v = verifier.get(contact_id) or {}
+        if not v.get("passed") and v.get("action") not in {"pass", "downgrade"}:
+            continue
+        contact = contacts.get(contact_id) or {}
+        step1 = sequence[0] if isinstance(sequence, list) and sequence else {}
+        items.append(
+            {
+                "contact_id": contact_id,
+                "lead_id": lead_id_for(campaign_id, contact_id),
+                "name": contact.get("name"),
+                "title": contact.get("title"),
+                "email": contact.get("email"),
+                "email_confidence": contact.get("email_confidence"),
+                "company_id": contact.get("company_id"),
+                "verifier": v,
+                "draft": step1,
+                "sequence_steps": [
+                    d.get("step") for d in sequence if isinstance(d, dict)
+                ]
+                if isinstance(sequence, list)
+                else [],
+                "cited_evidence_ids": step1.get("cited_evidence_ids") or [],
+            }
+        )
+    if not items:
+        return None
+    return {
+        "type": "email_approval",
+        "campaign_id": campaign_id,
+        "items": items,
+        "message": "Approve, edit, or reject verified drafts before send.",
+    }
+
+
 @router.get("/campaigns/{campaign_id}/pending-approvals", response_model=PendingApprovalsOut)
 def get_pending_approvals(campaign_id: str) -> PendingApprovalsOut:
+    from app.agents.evidence_refs import find_refs
+    from app.api.schemas import DraftClaimOut, EvidenceWhyOut
+
+    from app.infra.events import set_stage
+
     payload = state_reader.pending_interrupt(campaign_id)
     companies = {c["id"]: c for c in state_reader.companies(campaign_id) if isinstance(c, dict)}
+    accounts = state_reader.accounts(campaign_id)
+    drafts_all = state_reader.drafts(campaign_id)
+    used_fallback = False
+    if not payload or payload.get("type") != "email_approval":
+        payload = _build_email_approval_payload(campaign_id)
+        used_fallback = bool(payload)
     if not payload or payload.get("type") != "email_approval":
         return PendingApprovalsOut(campaign_id=campaign_id, waiting=False, items=[])
+    if used_fallback and (payload.get("items") or []):
+        # Heal pipeline cards after post-run manual drafts (run already finished).
+        set_stage(campaign_id, "emails", "done")
+        set_stage(campaign_id, "verify", "done", "1 passed")
+        set_stage(campaign_id, "approval", "waiting")
+        set_stage(campaign_id, "send", "pending")
     items_out: list[PendingApprovalItem] = []
     for item in payload.get("items") or []:
         if not isinstance(item, dict):
             continue
+        contact_id = str(item.get("contact_id") or "")
         draft = item.get("draft") or {}
+        # Prefer latest checkpoint draft (may include claims after fix-drafts)
+        seq = drafts_all.get(contact_id) or []
+        if seq and isinstance(seq[0], dict):
+            draft = seq[0]
         company = companies.get(item.get("company_id") or "") or {}
+        account = accounts.get(item.get("company_id") or "") or {}
+        ev_by_id = {
+            e.get("id"): e
+            for e in (account.get("evidence") or [])
+            if isinstance(e, dict) and e.get("id")
+        }
         email = item.get("email")
         conf = item.get("email_confidence") or "none"
+        from app.agents.email_writer import personalize_copy
+
+        raw_subject = draft.get("subject") if isinstance(draft, dict) else None
+        raw_body = draft.get("body") if isinstance(draft, dict) else None
+        seller_brief = state_reader.seller(campaign_id) or {}
+        subject, body = personalize_copy(
+            str(raw_subject or ""),
+            str(raw_body or ""),
+            contact_name=str(item.get("name") or ""),
+            company_name=str(company.get("name") or ""),
+            role=str(item.get("title") or ""),
+            seller_name=str(seller_brief.get("company_name") or ""),
+        )
+        claims_out: list[DraftClaimOut] = []
+        for c in (draft.get("claims") or []) if isinstance(draft, dict) else []:
+            if not isinstance(c, dict):
+                continue
+            eids = list(c.get("evidence_ids") or [])
+            claims_out.append(
+                DraftClaimOut(
+                    text=str(c.get("text") or ""),
+                    evidence_ids=eids,
+                    evidence=[
+                        EvidenceWhyOut(
+                            id=str(ev_by_id[eid]["id"]),
+                            fact=str(ev_by_id[eid].get("fact") or ""),
+                            source_type=ev_by_id[eid].get("source_type"),
+                            source_ref=ev_by_id[eid].get("source_ref"),
+                            observed_at=str(ev_by_id[eid].get("observed_at") or "")
+                            or None,
+                        )
+                        for eid in eids
+                        if eid in ev_by_id
+                    ],
+                )
+            )
+        from app.infra.email_templates import style_warnings as _style_warnings
+
+        warns = list((draft.get("style_warnings") or []) if isinstance(draft, dict) else [])
+        if not warns:
+            warns = _style_warnings(str(subject or ""), str(body or ""))
         items_out.append(
             PendingApprovalItem(
-                contact_id=str(item.get("contact_id") or ""),
+                contact_id=contact_id,
                 lead_id=item.get("lead_id"),
                 name=item.get("name"),
                 title=item.get("title"),
                 email_masked=mask_email(email) if email else None,
                 email_confidence=conf,
                 company_name=company.get("name"),
-                subject=(draft.get("subject") if isinstance(draft, dict) else None),
-                body=(draft.get("body") if isinstance(draft, dict) else None),
+                subject=subject,
+                body=body,
                 guessed=conf == "guessed",
+                has_internal_refs=bool(find_refs(f"{subject or ''}\n{body or ''}")),
+                claims=claims_out,
+                style_warnings=warns,
             )
         )
     return PendingApprovalsOut(
@@ -610,23 +780,53 @@ def _sequence_fields(
     lead_id: str | None,
     drafts_by_contact: dict[str, Any],
     emails_by_lead: dict[str, list[dict[str, Any]]],
+    *,
+    evidence_by_id: dict[str, dict[str, Any]] | None = None,
+    contact_name: str = "",
+    company_name: str = "",
+    role: str = "",
+    seller_name: str = "",
 ) -> dict[str, Any]:
+    from app.agents.email_writer import personalize_copy
+    from app.agents.evidence_refs import find_refs
+    from app.api.schemas import DraftClaimOut, EvidenceWhyOut
+
     draft_seq = list(drafts_by_contact.get(contact_id) or [])
     email_rows = list(emails_by_lead.get(lead_id or "") or [])
     by_step: dict[int, dict[str, Any]] = {}
+    step1_claims_raw: list[dict[str, Any]] = []
     for d in draft_seq:
         if isinstance(d, dict) and d.get("step"):
+            subj, body = personalize_copy(
+                str(d.get("subject") or ""),
+                str(d.get("body") or ""),
+                contact_name=contact_name,
+                company_name=company_name,
+                role=role,
+                seller_name=seller_name,
+            )
             by_step[int(d["step"])] = {
-                "subject": d.get("subject"),
-                "body": d.get("body"),
+                "subject": subj,
+                "body": body,
                 "status": "draft",
                 "sent_at": None,
             }
+            if int(d.get("step") or 0) == 1:
+                step1_claims_raw = list(d.get("claims") or [])
     for e in email_rows:
         step = int(e.get("step") or 1)
+        prior = by_step.get(step) or {}
+        subj, body = personalize_copy(
+            str(e.get("subject") or prior.get("subject") or ""),
+            str(e.get("body") or prior.get("body") or ""),
+            contact_name=contact_name,
+            company_name=company_name,
+            role=role,
+            seller_name=seller_name,
+        )
         by_step[step] = {
-            "subject": e.get("subject") or (by_step.get(step) or {}).get("subject"),
-            "body": e.get("body") or (by_step.get(step) or {}).get("body"),
+            "subject": subj,
+            "body": body,
             "status": e.get("delivery_status") or e.get("status") or "queued",
             "sent_at": e.get("sent_at"),
         }
@@ -639,6 +839,31 @@ def _sequence_fields(
     s1 = by_step.get(1) or {}
     s2 = by_step.get(2) or {}
     s3 = by_step.get(3) or {}
+    ev_map = evidence_by_id or {}
+    claims_out: list[DraftClaimOut] = []
+    for c in step1_claims_raw:
+        if not isinstance(c, dict):
+            continue
+        eids = list(c.get("evidence_ids") or [])
+        claims_out.append(
+            DraftClaimOut(
+                text=str(c.get("text") or ""),
+                evidence_ids=eids,
+                evidence=[
+                    EvidenceWhyOut(
+                        id=str(ev_map[eid]["id"]),
+                        fact=str(ev_map[eid].get("fact") or ""),
+                        source_type=ev_map[eid].get("source_type"),
+                        source_ref=ev_map[eid].get("source_ref"),
+                        observed_at=str(ev_map[eid].get("observed_at") or "") or None,
+                    )
+                    for eid in eids
+                    if eid in ev_map
+                ],
+            )
+        )
+    subj = s1.get("subject") or ""
+    body = s1.get("body") or ""
     return {
         "email_1_subject": s1.get("subject"),
         "email_1_body": s1.get("body"),
@@ -650,6 +875,8 @@ def _sequence_fields(
         "email_1_editable": _editable(1) if by_step.get(1) else True,
         "followup_1_editable": _editable(2) if by_step.get(2) else True,
         "followup_2_editable": _editable(3) if by_step.get(3) else True,
+        "claims": claims_out,
+        "has_internal_refs": bool(find_refs(f"{subj}\n{body}")),
     }
 
 
@@ -659,6 +886,7 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
     companies = {c["id"]: c for c in state_reader.companies(campaign_id) if isinstance(c, dict)}
     verifier = state_reader.verifier(campaign_id)
     drafts_by_contact = state_reader.drafts(campaign_id)
+    accounts = state_reader.accounts(campaign_id)
     settings = get_settings()
     conn = connect(settings.db_path)
     try:
@@ -680,11 +908,15 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
     emails_by_lead: dict[str, list[dict[str, Any]]] = {}
     for er in email_rows:
         emails_by_lead.setdefault(str(er["lead_id"]), []).append(dict(er))
+    seller_raw = state_reader.seller(campaign_id) or {}
+    seller_name = str(seller_raw.get("company_name") or "")
     out: list[LeadRow] = []
+    seen_companies: set[str] = set()
     for r in rows:
         contact_id = r["contact_id"] or ""
         contact = contacts.get(contact_id) or {}
-        company = companies.get(r["company_id"] or contact.get("company_id") or "") or {}
+        company_id = str(r["company_id"] or contact.get("company_id") or "")
+        company = companies.get(company_id) or {}
         v = verifier.get(contact_id) or {}
         action = v.get("action") or ("pass" if v.get("passed") else "pending")
         vlabel = {
@@ -693,13 +925,34 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
             "downgrade": "downgraded",
             "drop": "dropped",
         }.get(action, "pending")
-        seq = _sequence_fields(contact_id, r["id"], drafts_by_contact, emails_by_lead)
+        account = accounts.get(company_id) or {}
+        ev_by_id = {
+            e["id"]: e for e in (account.get("evidence") or []) if isinstance(e, dict) and e.get("id")
+        }
+        status = r["status"]
+        contact_name = contact.get("name")
+        if status == "no_contact" or (not contact_id and not contact_name):
+            contact_name = contact_name or "Not found"
+        seq = _sequence_fields(
+            contact_id,
+            r["id"],
+            drafts_by_contact,
+            emails_by_lead,
+            evidence_by_id=ev_by_id,
+            contact_name=str(contact.get("name") or ""),
+            company_name=str(company.get("name") or ""),
+            role=str(contact.get("title") or ""),
+            seller_name=seller_name,
+        )
+        if company_id:
+            seen_companies.add(company_id)
         out.append(
             LeadRow(
                 lead_id=r["id"],
+                company_id=company_id or None,
                 company_name=company.get("name") or "",
                 company_domain=company.get("domain") or "",
-                contact_name=contact.get("name"),
+                contact_name=contact_name,
                 contact_title=contact.get("title"),
                 role_kind=contact.get("role_kind"),
                 email_masked=mask_email(contact["email"]) if contact.get("email") else None,
@@ -707,20 +960,40 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
                 fit=int(round(float(company.get("fit_score") or 0) * 100)),
                 verifier=vlabel,  # type: ignore[arg-type]
                 redraft_count=int(v.get("redraft_count") or 0),
-                status=r["status"],
+                status=status,
                 updated_at=r["updated_at"],
                 contact_id=contact_id or None,
                 **seq,
             )
         )
-    # Also surface contacts not yet persisted as leads
+    # Surface contacts not yet persisted as leads
     if not out:
         for cid, contact in contacts.items():
-            company = companies.get(contact.get("company_id") or "") or {}
-            seq = _sequence_fields(cid, None, drafts_by_contact, emails_by_lead)
+            company_id = str(contact.get("company_id") or "")
+            company = companies.get(company_id) or {}
+            account = accounts.get(company_id) or {}
+            ev_by_id = {
+                e["id"]: e
+                for e in (account.get("evidence") or [])
+                if isinstance(e, dict) and e.get("id")
+            }
+            seq = _sequence_fields(
+                cid,
+                None,
+                drafts_by_contact,
+                emails_by_lead,
+                evidence_by_id=ev_by_id,
+                contact_name=str(contact.get("name") or ""),
+                company_name=str(company.get("name") or ""),
+                role=str(contact.get("title") or ""),
+                seller_name=seller_name,
+            )
+            if company_id:
+                seen_companies.add(company_id)
             out.append(
                 LeadRow(
                     lead_id=cid,
+                    company_id=company_id or None,
                     company_name=company.get("name") or "",
                     company_domain=company.get("domain") or "",
                     contact_name=contact.get("name"),
@@ -734,7 +1007,330 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
                     **seq,
                 )
             )
+    # Companies researched with no person/email (checkpoint may precede DB persist)
+    contact_companies = {
+        str(c.get("company_id")) for c in contacts.values() if c.get("company_id")
+    }
+    import uuid as _uuid
+
+    for cid, company in companies.items():
+        if cid in seen_companies or cid in contact_companies:
+            continue
+        is_no_contact = company.get("drop_reason") == "no_contact"
+        researched_no_person = (
+            company.get("status") == "kept"
+            and cid in accounts
+            and cid not in contact_companies
+        )
+        if not (is_no_contact or researched_no_person):
+            continue
+        lead_id = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{campaign_id}:company:{cid}"))
+        out.append(
+            LeadRow(
+                lead_id=lead_id,
+                company_id=cid,
+                company_name=company.get("name") or "",
+                company_domain=company.get("domain") or "",
+                contact_name="Not found",
+                contact_title=None,
+                role_kind=None,
+                email_masked=None,
+                email_confidence="none",
+                fit=int(round(float(company.get("fit_score") or 0) * 100)),
+                status="no_contact",
+                contact_id=None,
+            )
+        )
     return out
+
+
+@router.post(
+    "/campaigns/{campaign_id}/companies/{company_id}/contact",
+    response_model=LeadRow,
+)
+def add_manual_contact(
+    campaign_id: str, company_id: str, body: ManualContactIn
+) -> LeadRow:
+    """Attach a user-provided contact and generate a 3-step sequence (no Crustdata)."""
+    import re
+    import uuid
+    from datetime import datetime, timezone
+
+    from app.agents.email_writer import preview_sequence_for_lead
+    from app.infra.email_templates import style_warnings
+    from app.infra.events import set_stage
+    from app.models import AccountBrief, DraftClaim, SellerBrief
+
+    name = (body.name or "").strip()
+    email = (body.email or "").strip().lower()
+    title = (body.title or "Contact").strip() or "Contact"
+    if not name:
+        raise HTTPException(422, detail="name is required")
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(422, detail="email is invalid")
+
+    companies = {
+        c["id"]: c for c in state_reader.companies(campaign_id) if isinstance(c, dict)
+    }
+    company = companies.get(company_id)
+    if not company:
+        raise HTTPException(404, detail="Company not found in campaign")
+
+    seller_raw = state_reader.seller(campaign_id)
+    if not seller_raw:
+        raise HTTPException(422, detail="Seller brief missing; wait for product research")
+
+    accounts = dict(state_reader.accounts(campaign_id))
+    account_raw = accounts.get(company_id)
+    if not account_raw:
+        account_raw = {
+            "company_id": company_id,
+            "story": f"{company.get('name') or company_id} was on your target list.",
+            "why_now": ["User-provided contact; research did not find a person."],
+            "evidence": [],
+        }
+        accounts[company_id] = account_raw
+
+    contact_id = f"{company_id}:user:{uuid.uuid4().hex[:8]}"
+    contact = Contact(
+        id=contact_id,
+        company_id=company_id,
+        name=name,
+        title=title,
+        role_kind="economic_buyer",
+        email=email,
+        email_source="user",
+        email_confidence="verified",
+        profile_url=None,
+    )
+
+    # Restore company to kept
+    company = dict(company)
+    company["status"] = "kept"
+    company["drop_reason"] = None
+    companies[company_id] = company
+
+    values = state_reader.get_values(campaign_id)
+    extras = dict(values.get("extras") or {})
+    template_snapshot = str(
+        extras.get("template_snapshot")
+        or (values.get("input") or {}).get("template_snapshot")
+        or ""
+    )
+    if not template_snapshot:
+        from app.infra.email_templates import get_default_template
+
+        template_snapshot = str(get_default_template().get("content_md") or "")
+
+    try:
+        steps, _meta = preview_sequence_for_lead(
+            seller_raw=seller_raw,
+            contact=contact,
+            account_raw=account_raw,
+            company_name=str(company.get("name") or company_id),
+            template_snapshot=template_snapshot,
+            template_name=str(extras.get("template_name") or ""),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, detail=f"Could not write sequence: {exc}") from exc
+
+    draft_models: list[EmailDraft] = []
+    draft_dicts: list[dict[str, Any]] = []
+    for s in steps:
+        claims = [
+            DraftClaim(
+                text=str(c.get("text") or ""),
+                evidence_ids=list(c.get("evidence_ids") or []),
+            )
+            for c in (s.get("claims") or [])
+            if isinstance(c, dict) and c.get("text")
+        ]
+        draft = EmailDraft(
+            step=int(s["step"]),  # type: ignore[arg-type]
+            subject=str(s.get("subject") or "")[:160],
+            body=str(s.get("body") or ""),
+            cited_evidence_ids=[i for c in claims for i in c.evidence_ids][:8],
+            send_after_days={1: 0, 2: 3, 3: 7}.get(int(s["step"]), 0),
+            claims=claims,
+        )
+        draft_models.append(draft)
+        row = draft.model_dump(mode="json")
+        warns = style_warnings(draft.subject, draft.body)
+        if warns:
+            row["style_warnings"] = warns
+        draft_dicts.append(row)
+
+    seller = SellerBrief.model_validate(seller_raw)
+    account = AccountBrief.model_validate(account_raw)
+    evidence = list(account.evidence) + list(seller.evidence[:5])
+    verifier_map = dict(state_reader.verifier(campaign_id))
+    # User-provided contact: allow approval even when account evidence is thin.
+    try:
+        vr = verify_draft(
+            draft_models[0],
+            evidence=evidence,
+            contact=contact,
+            use_llm=False,
+        )
+        vdump = vr.model_dump(mode="json")
+        # Soft-pass: block only on internal_ref / hard policy; empty evidence is OK for manual.
+        hard = [i for i in (vdump.get("issues") or []) if "internal_ref" in str(i)]
+        if hard:
+            vdump["passed"] = False
+            vdump["action"] = "drop"
+        else:
+            vdump["passed"] = True
+            vdump["action"] = "pass"
+            vdump["issues"] = [
+                i for i in (vdump.get("issues") or []) if "internal_ref" not in str(i)
+            ][:5]
+        verifier_map[contact_id] = vdump
+    except Exception as exc:  # noqa: BLE001
+        verifier_map[contact_id] = {
+            "passed": True,
+            "action": "pass",
+            "issues": [f"manual_soft_pass:{exc}"],
+            "unsupported_claims": [],
+            "stale_evidence_ids": [],
+        }
+
+    contacts = [
+        c for c in state_reader.contacts(campaign_id) if isinstance(c, dict)
+    ]
+    contacts = [c for c in contacts if c.get("id") != contact_id]
+    contacts.append(contact.model_dump(mode="json"))
+    drafts = dict(state_reader.drafts(campaign_id))
+    drafts[contact_id] = draft_dicts
+
+    from app.tools.mailer import lead_id_for as _lead_id_for
+
+    lead_id = _lead_id_for(campaign_id, contact_id)
+    approval_item = {
+        "contact_id": contact_id,
+        "lead_id": lead_id,
+        "name": name,
+        "title": title,
+        "email": email,
+        "email_confidence": "verified",
+        "company_id": company_id,
+        "verifier": verifier_map[contact_id],
+        "draft": draft_dicts[0] if draft_dicts else {},
+        "sequence_steps": [d.get("step") for d in draft_dicts],
+        "cited_evidence_ids": (draft_dicts[0] or {}).get("cited_evidence_ids") or [],
+    }
+    pending_payload = {
+        "type": "email_approval",
+        "campaign_id": campaign_id,
+        "items": [approval_item],
+        "message": "Approve the draft for your added contact, then send.",
+    }
+    # Merge with any other pending items from prior manual adds
+    prior = extras.get("pending_email_approval")
+    if isinstance(prior, dict) and prior.get("items"):
+        existing = [
+            i
+            for i in prior["items"]
+            if isinstance(i, dict) and i.get("contact_id") != contact_id
+        ]
+        pending_payload["items"] = existing + [approval_item]
+    extras["pending_email_approval"] = pending_payload
+    # Clear prior send skip / approvals for this contact
+    approvals = dict(extras.get("email_approvals") or {})
+    approvals.pop(contact_id, None)
+    extras["email_approvals"] = approvals
+
+    state_reader.update_values(
+        campaign_id,
+        {
+            "contacts": contacts,
+            "companies": list(companies.values()),
+            "accounts": accounts,
+            "drafts": drafts,
+            "verifier": verifier_map,
+            "extras": extras,
+            "plan": {
+                **dict(values.get("plan") or {}),
+                "phase": "awaiting_approval",
+                "next": "approval_gate",
+            },
+        },
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    # Remove placeholder no_contact lead for this company
+    old_lead = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{campaign_id}:company:{company_id}"))
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    try:
+        conn.execute("DELETE FROM leads WHERE id = ?", (old_lead,))
+        conn.execute(
+            """
+            INSERT INTO leads (id, campaign_id, company_id, contact_id, status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                contact_id = excluded.contact_id,
+                status = excluded.status,
+                updated_at = excluded.updated_at
+            """,
+            (lead_id, campaign_id, company_id, contact_id, "awaiting_approval", now),
+        )
+        for draft in draft_dicts:
+            email_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{lead_id}:{draft.get('step')}"))
+            conn.execute(
+                """
+                INSERT INTO emails (id, lead_id, step, subject, body, status, idempotency_key, sent_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(id) DO UPDATE SET subject = excluded.subject, body = excluded.body, status = excluded.status
+                """,
+                (
+                    email_id,
+                    lead_id,
+                    int(draft.get("step") or 1),
+                    draft.get("subject") or "",
+                    draft.get("body") or "",
+                    "draft",
+                    f"{lead_id}:{draft.get('step')}",
+                ),
+            )
+        conn.execute(
+            "UPDATE campaigns SET status = ? WHERE id = ?",
+            ("waiting_approval", campaign_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    set_stage(campaign_id, "emails", "done", f"{len(drafts)} sequences")
+    set_stage(campaign_id, "verify", "done", "1 passed")
+    set_stage(campaign_id, "approval", "waiting")
+    set_stage(campaign_id, "send", "pending")
+
+    seq0 = draft_dicts[0] if draft_dicts else {}
+    seq1 = draft_dicts[1] if len(draft_dicts) > 1 else {}
+    seq2 = draft_dicts[2] if len(draft_dicts) > 2 else {}
+    return LeadRow(
+        lead_id=lead_id,
+        company_id=company_id,
+        company_name=str(company.get("name") or ""),
+        company_domain=str(company.get("domain") or ""),
+        contact_name=name,
+        contact_title=title,
+        role_kind="economic_buyer",
+        email_masked=mask_email(email),
+        email_confidence="verified",
+        fit=int(round(float(company.get("fit_score") or 0) * 100)),
+        verifier="passed",
+        status="awaiting_approval",
+        updated_at=now,
+        contact_id=contact_id,
+        email_1_subject=seq0.get("subject"),
+        email_1_body=seq0.get("body"),
+        followup_1_subject=seq1.get("subject"),
+        followup_1_body=seq1.get("body"),
+        followup_2_subject=seq2.get("subject"),
+        followup_2_body=seq2.get("body"),
+    )
 
 
 @router.get("/leads/{lead_or_contact_id}", response_model=LeadDetail)
@@ -1018,6 +1614,10 @@ def email_decision(
 
 @router.post("/campaigns/{campaign_id}/send-approved")
 def send_approved(campaign_id: str) -> dict[str, Any]:
+    """Resume graph interrupt when present; otherwise send approved drafts inline (manual contacts)."""
+    from app.agents.sender import sender_node
+    from app.infra.events import set_stage
+
     settings = get_settings()
     init_db(settings.db_path)
     conn = connect(settings.db_path)
@@ -1028,13 +1628,18 @@ def send_approved(campaign_id: str) -> dict[str, Any]:
         ).fetchall()
     finally:
         conn.close()
+
     payload_interrupt = state_reader.pending_interrupt(campaign_id)
-    items = (payload_interrupt or {}).get("items") or []
+    has_interrupt = bool(
+        payload_interrupt and payload_interrupt.get("type") == "email_approval"
+    )
+    payload = payload_interrupt if has_interrupt else _build_email_approval_payload(campaign_id)
+    items = (payload or {}).get("items") or []
     item_ids = {i["contact_id"] for i in items if isinstance(i, dict)}
     approvals: dict[str, Any] = {}
     for r in rows:
         cid = r["contact_id"]
-        if cid not in item_ids and item_ids:
+        if item_ids and cid not in item_ids:
             continue
         if r["action"] == "approve":
             approvals[cid] = {
@@ -1049,23 +1654,125 @@ def send_approved(campaign_id: str) -> dict[str, Any]:
         cid = item["contact_id"]
         if cid not in approvals:
             approvals[cid] = {"approved": False}
+
+    if not any(a.get("approved") for a in approvals.values()):
+        raise HTTPException(422, detail="No approved drafts to send")
+
     decision = {"approvals": approvals, "actor": "api"}
+
+    # Live graph interrupt: resume via approve CLI spawn
+    if has_interrupt:
+        conn = connect(settings.db_path)
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO gate_decisions (campaign_id, gate, decision_json, status, created_at)
+                VALUES (?, 'send', ?, 'pending', ?)
+                """,
+                (campaign_id, json.dumps(decision), datetime.now(timezone.utc).isoformat()),
+            )
+            decision_id = cur.lastrowid
+            conn.commit()
+        finally:
+            conn.close()
+        try:
+            pid = run_manager.approve_decision(campaign_id, int(decision_id))
+        except RuntimeError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        state_reader.invalidate(campaign_id)
+        return {"decision_id": decision_id, "pid": pid, "approvals": len(approvals)}
+
+    # Post-run / manual-contact path: no interrupt — apply approvals and send here
+    values = state_reader.get_values(campaign_id)
+    drafts = dict(values.get("drafts") or {})
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cid = item["contact_id"]
+        choice = approvals.get(cid) or {}
+        if not choice.get("approved"):
+            continue
+        seq = list(drafts.get(cid) or [])
+        if seq and (choice.get("subject") or choice.get("body")):
+            step1 = dict(seq[0])
+            if choice.get("subject"):
+                step1["subject"] = choice["subject"]
+            if choice.get("body"):
+                step1["body"] = choice["body"]
+            seq[0] = step1
+            drafts[cid] = seq
+        write_audit(
+            actor="api",
+            action="approve",
+            target=str(item.get("lead_id") or cid),
+            details={"contact_id": cid, "inline_send": True},
+        )
+
+    extras = dict(values.get("extras") or {})
+    extras["email_approvals"] = approvals
+    extras.pop("pending_email_approval", None)
+
+    state = {
+        **values,
+        "campaign_id": campaign_id,
+        "drafts": drafts,
+        "extras": extras,
+        "events": list(values.get("events") or []),
+        "errors": list(values.get("errors") or []),
+    }
+    set_stage(campaign_id, "approval", "done")
+    set_stage(campaign_id, "send", "running")
+    out = sender_node(state)
+    sent_n = sum(
+        1
+        for e in (out.get("events") or [])
+        if isinstance(e, dict) and e.get("type") == "send.step1"
+    )
+    merged_extras = dict(out.get("extras") or extras)
+    merged_extras["email_approvals"] = approvals
+    merged_extras.pop("pending_email_approval", None)
+    state_reader.update_values(
+        campaign_id,
+        {
+            "drafts": out.get("drafts") or drafts,
+            "extras": merged_extras,
+            "events": out.get("events") or state["events"],
+            "errors": out.get("errors") or state["errors"],
+            "plan": out.get("plan") or {"phase": "after_email"},
+        },
+    )
+    set_stage(campaign_id, "send", "done", f"{sent_n} sent")
     conn = connect(settings.db_path)
     try:
-        cur = conn.execute(
-            """
-            INSERT INTO gate_decisions (campaign_id, gate, decision_json, status, created_at)
-            VALUES (?, 'send', ?, 'pending', ?)
-            """,
-            (campaign_id, json.dumps(decision), datetime.now(timezone.utc).isoformat()),
+        now = datetime.now(timezone.utc).isoformat()
+        for cid, choice in approvals.items():
+            if not choice.get("approved"):
+                continue
+            lead_id = next(
+                (
+                    str(i.get("lead_id"))
+                    for i in items
+                    if isinstance(i, dict) and i.get("contact_id") == cid
+                ),
+                None,
+            )
+            if lead_id:
+                conn.execute(
+                    "UPDATE leads SET status = ?, updated_at = ? WHERE id = ?",
+                    ("sent" if sent_n else "approved", now, lead_id),
+                )
+        conn.execute(
+            "UPDATE campaigns SET status = ? WHERE id = ?",
+            ("completed", campaign_id),
         )
-        decision_id = cur.lastrowid
         conn.commit()
     finally:
         conn.close()
-    try:
-        pid = run_manager.approve_decision(campaign_id, int(decision_id))
-    except RuntimeError as exc:
-        raise HTTPException(409, detail=str(exc)) from exc
     state_reader.invalidate(campaign_id)
-    return {"decision_id": decision_id, "pid": pid, "approvals": len(approvals)}
+    return {
+        "decision_id": None,
+        "pid": None,
+        "approvals": len(approvals),
+        "sent": sent_n,
+        "inline": True,
+    }

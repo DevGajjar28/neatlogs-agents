@@ -219,6 +219,11 @@ def execute_campaign(
     mode: str,
     chaos: str = "",
     narrow_icp: bool = False,
+    target_mode: str = "discover",
+    provided_companies: list[dict[str, str]] | None = None,
+    template_id: str | None = None,
+    template_name: str | None = None,
+    template_snapshot: str | None = None,
     kind: str = "start",
     fresh: bool = True,
 ) -> dict[str, Any]:
@@ -242,6 +247,11 @@ def execute_campaign(
                 n=n,
                 mode=mode,
                 narrow_icp=narrow_icp,
+                target_mode=target_mode,
+                provided_companies=provided_companies,
+                template_id=template_id,
+                template_name=template_name,
+                template_snapshot=template_snapshot,
             )
             result = app_graph.invoke(state, config=config)
         else:
@@ -295,6 +305,16 @@ def load_campaign_options(campaign_id: str) -> dict[str, Any]:
             "mode": str(opts.get("mode") or inp.get("mode") or get_settings().data_mode),
             "chaos": str(opts.get("chaos") or ""),
             "narrow_icp": bool(opts.get("narrow_icp") or inp.get("narrow_icp")),
+            "target_mode": str(
+                opts.get("target_mode") or inp.get("target_mode") or "discover"
+            ),
+            "provided_companies": list(
+                opts.get("provided_companies") or inp.get("provided_companies") or []
+            ),
+            "template_id": opts.get("template_id") or inp.get("template_id"),
+            "template_name": opts.get("template_name") or inp.get("template_name"),
+            "template_snapshot": opts.get("template_snapshot")
+            or inp.get("template_snapshot"),
         }
     finally:
         conn.close()

@@ -6,13 +6,15 @@ from app.mail.compose import compose, has_opt_out_line, strip_citations
 
 
 def test_strip_citations():
-    assert "[ev_1]" not in strip_citations("Hello [ev_abc] world")
+    assert "[ev_" not in strip_citations("Hello [ev_abc123] world")
+    assert "(ev_" not in strip_citations("Hello (ev_abc123, ev_def456) world")
+    assert "ev_" not in strip_citations("bare ev_abc123 end").lower()
     assert strip_citations("plain") == "plain"
 
 
 def test_opt_out_and_footer():
     out = compose(
-        subject="Hi [ev_x]",
+        subject="Hi [ev_abc123]",
         body="Body without footer",
         to_addr="a@b.com",
         from_email="me@example.com",

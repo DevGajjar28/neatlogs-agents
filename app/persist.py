@@ -35,6 +35,35 @@ def persist_v0_run(state: dict[str, Any]) -> None:
 
         contacts = {c["id"]: c for c in (state.get("contacts") or []) if isinstance(c, dict)}
         drafts = state.get("drafts") or {}
+        companies = [
+            c for c in (state.get("companies") or []) if isinstance(c, dict) and c.get("id")
+        ]
+
+        # Companies with no contact still get a lead row so the UI can show Add contact.
+        contact_company_ids = {
+            str(c.get("company_id")) for c in contacts.values() if c.get("company_id")
+        }
+        for company in companies:
+            cid = str(company["id"])
+            drop = company.get("drop_reason")
+            status = company.get("status")
+            if cid in contact_company_ids:
+                continue
+            if status == "dropped" and drop == "no_contact":
+                lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{campaign_id}:company:{cid}"))
+                conn.execute(
+                    """
+                    INSERT INTO leads (id, campaign_id, company_id, contact_id, status, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        status = CASE
+                            WHEN leads.status IN ('drafted', 'approved', 'sent') THEN leads.status
+                            ELSE excluded.status
+                        END,
+                        updated_at = excluded.updated_at
+                    """,
+                    (lead_id, campaign_id, cid, None, "no_contact", now),
+                )
 
         for contact_id, sequence in drafts.items():
             contact = contacts.get(contact_id) or {}
@@ -43,7 +72,8 @@ def persist_v0_run(state: dict[str, Any]) -> None:
                 """
                 INSERT INTO leads (id, campaign_id, company_id, contact_id, status, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
+                ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at,
+                    contact_id = excluded.contact_id
                 """,
                 (
                     lead_id,

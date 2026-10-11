@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { WhyWeSaidThis } from "@/components/mail/WhyWeSaidThis";
 import {
   ApiError,
   decideEmail,
@@ -23,6 +24,8 @@ import {
   type PendingApprovalItem,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/keys";
+
+const EV_RE = /\bev_[0-9a-f]{6,}\b/i;
 
 type DraftCard = PendingApprovalItem & {
   campaignId: string;
@@ -129,20 +132,25 @@ function ApprovalCard({ card, onDone }: { card: DraftCard; onDone: () => void })
     setBody(card.body || "");
   }, [card.subject, card.body]);
 
+  const hasRefs =
+    Boolean(card.has_internal_refs) || EV_RE.test(`${subject}\n${body}`);
+
   const mut = useMutation({
     mutationFn: async (action: "approve" | "reject") => {
+      if (action === "approve" && hasRefs) {
+        throw new ApiError(
+          "This draft still has internal reference ids. Edit or regenerate it.",
+          422,
+          null,
+        );
+      }
       await decideEmail(card.campaignId, card.contact_id, {
         action,
         subject: action === "approve" ? subject : undefined,
         body: action === "approve" ? body : undefined,
         confirm_guessed: confirmGuessed,
       });
-      if (action === "approve") {
-        await sendApproved(card.campaignId);
-      } else {
-        // Still flush gate so rejected items don't block forever
-        await sendApproved(card.campaignId);
-      }
+      await sendApproved(card.campaignId);
     },
     onSuccess: (_data, action) => {
       toast.success(action === "approve" ? "Approved — sending" : "Rejected");
@@ -192,6 +200,21 @@ function ApprovalCard({ card, onDone }: { card: DraftCard; onDone: () => void })
           className="text-[13px]"
         />
       </div>
+      <div className="mb-3">
+        <WhyWeSaidThis body={body} claims={card.claims || []} />
+      </div>
+      {(card.style_warnings || []).length > 0 ? (
+        <ul className="mb-3 list-inside list-disc text-[12px] text-[var(--status-warning)]">
+          {(card.style_warnings || []).map((w) => (
+            <li key={w}>Style warning: {w}</li>
+          ))}
+        </ul>
+      ) : null}
+      {hasRefs ? (
+        <p className="mb-3 text-[12px] font-medium text-[var(--status-danger)]">
+          This draft still has internal reference ids. Edit or regenerate it.
+        </p>
+      ) : null}
       {card.guessed ? (
         <label className="mb-3 flex items-center gap-2 text-[12px] text-[var(--text-muted)]">
           <Checkbox
@@ -204,7 +227,7 @@ function ApprovalCard({ card, onDone }: { card: DraftCard; onDone: () => void })
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          disabled={mut.isPending || (card.guessed && !confirmGuessed)}
+          disabled={mut.isPending || hasRefs || (card.guessed && !confirmGuessed)}
           onClick={() => mut.mutate("approve")}
         >
           Accept & send

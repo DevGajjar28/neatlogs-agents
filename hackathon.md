@@ -130,6 +130,32 @@ v0 has no planner, verifier, human gates, fallback chain, or sender. Person-sear
 - Failures remaining: live prospect sends still gated (`DEMO_MODE` / `ALLOW_LIVE_SENDS`); full ICP/email gate UI polish still later.
 - Evidence: `app/mail/*`, `app/api/routes/mail.py`, Settings/Outbox UI; unit coverage for every docs/12 §3 policy rule.
 
+### 2026-10-11 22:05 IST
+- Completed: **Section A (evidence-id leak)** per `13_COMPANY_LIST_TEMPLATES_EVIDENCE.md` + docs/12. Root cause confirmed: writer left `ev_*` inline; `compose.strip_citations` and policy rule 15 only matched `[ev_*]`, so parenthesis/bare forms leaked. Fix: structured writer output with `claims[]`, `app/agents/evidence_refs.py` (`find_refs`/`strip_refs`), sanitize before verify, policy blocks any `ev_` form (`internal_ref`), `cli.py fix-drafts`, Approvals/Leads “Why we said this”, Accept disabled when refs remain, opt-out copy updated, `app/agents/email_templates/default.md` seeded for later Section C.
+- Planned: wait for check, then Section B (company list CSV) then C (templates CRUD).
+- Tests run: `pytest` — **100 passed** (incl. `tests/test_evidence_refs.py` Anark case + all wrapper forms).
+- Failures remaining: Sections B/C not started; existing drafts at approval may need `python cli.py fix-drafts <campaign_id>`.
+- Evidence: no addresses/secrets; default template path only.
+
+### 2026-10-11 22:45 IST
+- Completed: **Section B (company list)** per `13_COMPANY_LIST_TEMPLATES_EVIDENCE.md`. CSV parser (`app/infra/company_list.py`), `POST /campaigns/parse-companies`, create-campaign `target_mode`/`provided_companies`, `estimate_campaign(..., target_mode)` (no company-search credits for provided), graph node `buyer_import` (free cached identify), planner routes provided → import (no ICP widen), event templates, NewCampaignDrawer segmented control + preview table + sample CSV, campaign “Your list” badge, pipeline count `Using your list · X of Y matched`, CLI `parse-companies`.
+- Planned: wait for check, then Section C (email templates CRUD).
+- Tests run: `pytest` — **111 passed** (incl. `tests/test_company_list.py` parser, routing, import not-found, estimate).
+- Failures remaining: Section C not started.
+- Evidence: no addresses/secrets.
+
+### 2026-10-11 23:05 IST
+- Completed: **Section C (email templates)** per `13_COMPANY_LIST_TEMPLATES_EVIDENCE.md`. Table `email_templates` + seed from `default.md`; CRUD/duplicate/default/preview API; campaign create snapshots `template_id`/`template_name`/`template_snapshot`; writer prompt = SYSTEM RULES then `<template>`; style warnings (banned phrases / em dash) on approvals; Settings → Email templates Sheet; New campaign Email style picker + Preview; campaign detail shows Email style name.
+- Planned: manual demo with CSV list + custom template; then submission polish.
+- Tests run: `pytest` — **119 passed** (incl. `tests/test_email_templates.py` CRUD, system 403, snapshot, prompt order, preview `crustdata_calls=0`).
+- Failures remaining: none known for A/B/C scope.
+- Evidence: no addresses/secrets.
+
+### 2026-10-11 23:20 IST
+- Completed: **Your list UX** — skip Buyer Finder/ICP when `target_mode=provided` (pipeline card **Your list**); persist/list `no_contact` companies; email stage finishes with “add a contact” instead of looking stuck; `POST .../companies/{id}/contact` + Add contact drawer drafts the 3-step sequence from the template snapshot (no Crustdata).
+- Tests run: `pytest` — **125 passed**.
+- Evidence: no addresses/secrets.
+
 ## Submission
 - [ ] public repo  - [ ] video ≤3 min  - [ ] neatlogs traces  - [ ] Entire checkpoint link + ID
 - [ ] cfo.ai plan  - [ ] #neatHack posts  - [ ] quote post on X in window

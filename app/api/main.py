@@ -6,14 +6,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import campaigns, mail, system
+from app.api.routes import campaigns, email_templates, mail, system
 from app.config import get_settings
 from app.infra.db import init_db
+from app.infra.email_templates import seed_default_template
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    init_db(get_settings().db_path)
+    path = get_settings().db_path
+    init_db(path)
+    seed_default_template(path)
     yield
 
 
@@ -28,3 +31,4 @@ app.add_middleware(
 app.include_router(system.router, prefix="/api")
 app.include_router(campaigns.router, prefix="/api")
 app.include_router(mail.router, prefix="/api")
+app.include_router(email_templates.router, prefix="/api")

@@ -12,5 +12,7 @@ export const queryKeys = {
   mailPresets: ["mail-accounts", "presets"] as const,
   mailPolicies: ["settings", "policies"] as const,
   policyEvents: (rule: string) => ["settings", "policies", rule, "events"] as const,
+  emailTemplates: ["email-templates"] as const,
+  emailTemplate: (id: string) => ["email-templates", id] as const,
   outbox: ["outbox"] as const,
 };

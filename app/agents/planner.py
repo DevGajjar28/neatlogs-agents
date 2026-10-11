@@ -23,9 +23,9 @@ _RANGE_NEIGHBORS: dict[str, list[str]] = {
 }
 
 
-def estimate_credits(n: int) -> float:
+def estimate_credits(n: int, *, target_mode: str = "discover") -> float:
     """Rough credit estimate for an N-lead campaign (delegates to budget.estimate_campaign)."""
-    return float(estimate_campaign(n, mode="live")["total"])
+    return float(estimate_campaign(n, mode="live", target_mode=target_mode)["total"])
 
 
 def _check_pause(campaign_id: str) -> bool:
@@ -71,26 +71,42 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     spent = float((state.get("budget") or {}).get("credits_spent") or 0)
     updates: dict[str, Any] = {}
 
+    target_mode = str(
+        input_data.get("target_mode") or plan.get("target_mode") or "discover"
+    )
     if not plan.get("initialized"):
-        estimate = estimate_credits(n)
+        estimate = estimate_credits(n, target_mode=target_mode)
+        buyer_step = "buyer_import" if target_mode == "provided" else "buyer_search"
+        if target_mode == "provided":
+            steps = [
+                "product_researcher",
+                "buyer_import",
+                "account_researcher",
+                "email_writer",
+            ]
+            rationale = f"Plan for N={n}: product → import your list → account → email"
+        else:
+            steps = [
+                "product_researcher",
+                "buyer_propose_icp",
+                "icp_gate",
+                buyer_step,
+                "account_researcher",
+                "email_writer",
+            ]
+            rationale = f"Plan for N={n}: product → ICP gate → search → account → email"
         plan.update(
             {
                 "initialized": True,
                 "version": "v0.4",
                 "widenings": 0,
-                "max_widenings": 2,
+                "max_widenings": 0 if target_mode == "provided" else 2,
                 "estimated_credits": estimate,
                 "max_credits": max_credits,
                 "phase": "init",
-                "steps": [
-                    "product_researcher",
-                    "buyer_propose_icp",
-                    "icp_gate",
-                    "buyer_search",
-                    "account_researcher",
-                    "email_writer",
-                ],
-                "rationale": f"Plan for N={n}: product → ICP gate → search → account → email",
+                "target_mode": target_mode,
+                "steps": steps,
+                "rationale": rationale,
             }
         )
         if estimate > max_credits:
@@ -172,18 +188,26 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     if phase == "need_product" or (phase == "init" and not state.get("seller")):
         plan["next"] = "product_researcher"
     elif phase == "after_product":
-        plan["next"] = "buyer_propose_icp"
-        plan["phase"] = "need_icp"
+        # Your list: skip ICP propose/gate — titles fall back in account researcher.
+        if target_mode == "provided":
+            plan["next"] = "buyer_import"
+            plan["phase"] = "searching"
+        else:
+            plan["next"] = "buyer_propose_icp"
+            plan["phase"] = "need_icp"
     elif phase == "after_icp_proposed":
         plan["next"] = "icp_gate"
     elif phase == "after_icp_approved":
-        plan["next"] = "buyer_search"
+        plan["next"] = "buyer_import" if target_mode == "provided" else "buyer_search"
         plan["phase"] = "searching"
     elif phase == "after_search":
         kept = [c for c in (state.get("companies") or []) if c.get("status") == "kept"]
         widenings = int(plan.get("widenings") or 0)
         max_widenings = int(plan.get("max_widenings") or 2)
-        if len(kept) < n and widenings < max_widenings:
+        # User-provided lists never widen / re-search.
+        if target_mode == "provided":
+            plan["next"] = "account_researcher"
+        elif len(kept) < n and widenings < max_widenings:
             widenings += 1
             plan["widenings"] = widenings
             icp = ICPProposal.model_validate(state["icp"])
@@ -249,7 +273,31 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
             plan["next"] = "account_researcher"
             plan["phase"] = "need_account_retry"
         else:
-            plan["next"] = "email_writer"
+            contacts = state.get("contacts") or []
+            if not contacts:
+                # No people found — finish run; user can add contacts manually.
+                from app.infra.events import set_stage
+
+                if campaign_id:
+                    set_stage(
+                        campaign_id,
+                        "emails",
+                        "done",
+                        "0 drafts — add a contact",
+                    )
+                    set_stage(campaign_id, "verify", "skipped")
+                    set_stage(campaign_id, "approval", "skipped")
+                    set_stage(campaign_id, "send", "skipped")
+                events.append(
+                    {
+                        "type": "plan.no_contacts",
+                        "detail": "No contacts found; add a contact to write emails",
+                    }
+                )
+                plan["next"] = "done"
+                plan["phase"] = "awaiting_manual_contact"
+            else:
+                plan["next"] = "email_writer"
     elif phase == "after_email":
         plan["next"] = "done"
         plan["phase"] = "done"
@@ -258,15 +306,17 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
         if not state.get("seller"):
             plan["next"] = "product_researcher"
             plan["phase"] = "need_product"
-        elif not state.get("icp"):
+        elif target_mode == "provided" and not state.get("companies"):
+            plan["next"] = "buyer_import"
+        elif target_mode != "provided" and not state.get("icp"):
             plan["next"] = "buyer_propose_icp"
-        elif not (state.get("icp") or {}).get("approved"):
+        elif target_mode != "provided" and not (state.get("icp") or {}).get("approved"):
             plan["next"] = "icp_gate"
         elif not state.get("companies"):
-            plan["next"] = "buyer_search"
+            plan["next"] = "buyer_import" if target_mode == "provided" else "buyer_search"
         elif not state.get("contacts") and not state.get("accounts"):
             plan["next"] = "account_researcher"
-        elif not state.get("drafts"):
+        elif state.get("contacts") and not state.get("drafts"):
             plan["next"] = "email_writer"
         else:
             plan["next"] = "done"

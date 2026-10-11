@@ -25,12 +25,16 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { EmailTemplatesSection } from "@/components/mail/EmailTemplatesSection";
 import {
   ApiError,
   createCampaign,
   estimateCampaign,
   getSystemStatus,
+  listEmailTemplates,
   listMailAccounts,
+  parseCompaniesCsv,
+  type ParseCompaniesRow,
   type SendMode,
 } from "@/lib/api";
 import { formatCredits } from "@/lib/format";
@@ -52,6 +56,7 @@ const KILL_NODES = [
   "product_researcher",
   "buyer_propose_icp",
   "buyer_search",
+  "buyer_import",
   "account_enrich",
   "account_researcher",
   "email_writer",
@@ -59,6 +64,12 @@ const KILL_NODES = [
   "approval_gate",
   "sender",
 ] as const;
+
+const SAMPLE_CSV = `company_name,website,description
+Acme Analytics,https://acme-analytics.example,B2B product analytics
+Northwind Labs,northwindlabs.example,Devtools for infra teams
+Contoso Cloud,https://www.contoso-cloud.example/about,Cloud cost visibility
+`;
 
 function normalizeWebsite(raw: string): string {
   const t = raw.trim();
@@ -96,6 +107,13 @@ export function NewCampaignDrawer() {
   const [sendMode, setSendMode] = useState<SendMode>("sandbox");
   const [mailAccountId, setMailAccountId] = useState<string>("");
   const [liveConfirm, setLiveConfirm] = useState("");
+  const [targetMode, setTargetMode] = useState<"discover" | "provided">("discover");
+  const [csvText, setCsvText] = useState("");
+  const [parsedRows, setParsedRows] = useState<ParseCompaniesRow[]>([]);
+  const [okCount, setOkCount] = useState(0);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [templateId, setTemplateId] = useState<string>("");
+  const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!newCampaignOpen) return;
@@ -103,11 +121,64 @@ export function NewCampaignDrawer() {
     setWebsiteError(null);
   }, [newCampaignOpen]);
 
-  const estimateQ = useQuery({
-    queryKey: ["estimate", n, mode],
-    queryFn: () => estimateCampaign(n, mode),
-    enabled: newCampaignOpen && n >= 5 && n <= 50,
+  const templatesQ = useQuery({
+    queryKey: queryKeys.emailTemplates,
+    queryFn: listEmailTemplates,
+    enabled: newCampaignOpen,
   });
+
+  useEffect(() => {
+    if (!templatesQ.data?.length) return;
+    setTemplateId((prev) => {
+      if (prev && templatesQ.data.some((t) => t.id === prev)) return prev;
+      const def = templatesQ.data.find((t) => t.is_default) || templatesQ.data[0];
+      return def?.id || "";
+    });
+  }, [templatesQ.data]);
+
+  const effectiveN = targetMode === "provided" ? Math.max(okCount, 1) : n;
+
+  const estimateQ = useQuery({
+    queryKey: ["estimate", effectiveN, mode, targetMode],
+    queryFn: () => estimateCampaign(effectiveN, mode, targetMode),
+    enabled:
+      newCampaignOpen &&
+      effectiveN >= 1 &&
+      effectiveN <= 50 &&
+      (targetMode === "discover" ? n >= 5 : okCount >= 1),
+  });
+
+  const parseMut = useMutation({
+    mutationFn: (text: string) => parseCompaniesCsv(text),
+    onSuccess: (data) => {
+      setParsedRows(data.rows || []);
+      setOkCount(data.ok_count || 0);
+      setParseError(null);
+    },
+    onError: (err) => {
+      setParsedRows([]);
+      setOkCount(0);
+      setParseError(
+        err instanceof ApiError ? err.message : "Couldn't parse the company list.",
+      );
+    },
+  });
+
+  useEffect(() => {
+    if (targetMode !== "provided") return;
+    const t = csvText.trim();
+    if (!t) {
+      setParsedRows([]);
+      setOkCount(0);
+      setParseError(null);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      parseMut.mutate(csvText);
+    }, 350);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvText, targetMode]);
 
   const statusQ = useQuery({
     queryKey: queryKeys.systemStatus,
@@ -154,11 +225,24 @@ export function NewCampaignDrawer() {
     }
   }, [sendMode]);
 
+  const okCompanies = useMemo(
+    () =>
+      parsedRows
+        .filter((r) => r.status === "ok")
+        .map((r) => ({
+          name: r.name,
+          domain: r.domain,
+          description: r.description || "",
+        })),
+    [parsedRows],
+  );
+
   const valid =
     companyName.trim().length > 0 &&
     isValidHttpUrl(normalizeWebsite(website)) &&
-    n >= 5 &&
-    n <= 50 &&
+    (targetMode === "provided"
+      ? okCount >= 1 && okCount <= 50
+      : n >= 5 && n <= 50) &&
     cap > 0 &&
     (sendMode === "sandbox" || Boolean(mailAccountId)) &&
     (sendMode !== "gmail_live" ||
@@ -174,7 +258,7 @@ export function NewCampaignDrawer() {
         company_name: companyName.trim(),
         website: normalizeWebsite(website),
         description: description.trim(),
-        n,
+        n: targetMode === "provided" ? okCount : n,
         mode,
         cap,
         chaos: chaosCsv,
@@ -183,6 +267,9 @@ export function NewCampaignDrawer() {
         mail_account_id: sendMode === "sandbox" ? null : mailAccountId || null,
         live_confirm_email:
           sendMode === "gmail_live" ? liveConfirm.trim() : null,
+        target_mode: targetMode,
+        provided_companies: targetMode === "provided" ? okCompanies : [],
+        template_id: templateId || null,
       }),
     onSuccess: (campaign) => {
       setNewCampaignOpen(false);
@@ -200,6 +287,7 @@ export function NewCampaignDrawer() {
   });
 
   return (
+    <>
     <Sheet open={newCampaignOpen} onOpenChange={setNewCampaignOpen}>
       <SheetContent
         side="right"
@@ -256,15 +344,168 @@ export function NewCampaignDrawer() {
             />
           </Field>
 
-          <Field label="Leads to find">
-            <Input
-              type="number"
-              min={5}
-              max={50}
-              value={n}
-              onChange={(e) => setN(Number(e.target.value) || 5)}
-              className="h-8 w-28 rounded-[6px] font-mono"
-            />
+          <Field label="Target companies">
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["discover", "Find buyers for me", "Search lookalikes from your ICP"],
+                  ["provided", "Use my list", "Paste or upload a CSV of companies"],
+                ] as const
+              ).map(([value, title, hint]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setTargetMode(value)}
+                  className={cn(
+                    "rounded-[6px] border px-3 py-2 text-left",
+                    targetMode === value
+                      ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)]",
+                  )}
+                >
+                  <div className="text-[13px] font-medium">{title}</div>
+                  <div className="text-[11px] text-[var(--text-subtle)]">{hint}</div>
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          {targetMode === "provided" ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[12px] font-medium text-[var(--text)]">
+                  Company list
+                </span>
+                <button
+                  type="button"
+                  className="text-[12px] font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                  onClick={() => {
+                    const blob = new Blob([SAMPLE_CSV], { type: "text/csv;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "sample-companies.csv";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Download sample CSV
+                </button>
+              </div>
+              <Textarea
+                value={csvText}
+                onChange={(e) => setCsvText(e.target.value)}
+                rows={5}
+                placeholder={"company_name,website,description\nAcme,https://acme.com,Notes"}
+                className="rounded-[6px] font-mono text-[12px]"
+              />
+              <label className="inline-flex cursor-pointer text-[12px] font-medium text-[var(--accent)] underline-offset-2 hover:underline">
+                Upload CSV
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const text = await file.text();
+                    setCsvText(text);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <p className="text-[12px] text-[var(--text-muted)]">
+                Header optional. One company per line:{" "}
+                <span className="font-mono">Name, https://site.com</span>
+                {" "}(or CSV with company_name, website, description). Max 50.
+              </p>
+              {parseError ? (
+                <p className="text-[12px] text-[var(--status-danger)]">{parseError}</p>
+              ) : null}
+              {parsedRows.length > 0 ? (
+                <div className="max-h-40 overflow-auto rounded-[6px] border border-[var(--border)]">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="sticky top-0 bg-[var(--surface-muted)] text-[var(--text-muted)]">
+                      <tr>
+                        <th className="px-2 py-1.5 font-medium">Name</th>
+                        <th className="px-2 py-1.5 font-medium">Domain</th>
+                        <th className="px-2 py-1.5 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedRows.map((row, i) => (
+                        <tr key={`${row.domain}-${i}`} className="border-t border-[var(--border)]">
+                          <td className="px-2 py-1.5">{row.name || "—"}</td>
+                          <td className="px-2 py-1.5 font-mono">{row.domain || "—"}</td>
+                          <td
+                            className={cn(
+                              "px-2 py-1.5",
+                              row.status === "ok"
+                                ? "text-[var(--status-success)]"
+                                : "text-[var(--status-danger)]",
+                            )}
+                          >
+                            {row.status}
+                            {row.reason ? ` · ${row.reason}` : ""}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+              <p className="text-[12px] text-[var(--text-muted)]">
+                {okCount} valid compan{okCount === 1 ? "y" : "ies"}
+                {parseMut.isPending ? " · parsing…" : ""}
+              </p>
+            </div>
+          ) : (
+            <Field label="Leads to find">
+              <Input
+                type="number"
+                min={5}
+                max={50}
+                value={n}
+                onChange={(e) => setN(Number(e.target.value) || 5)}
+                className="h-8 w-28 rounded-[6px] font-mono"
+              />
+            </Field>
+          )}
+
+          <Field label="Email style">
+            <div className="flex items-center gap-2">
+              <Select
+                value={templateId || "__none__"}
+                onValueChange={(v) => setTemplateId(v === "__none__" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 flex-1 rounded-[6px]">
+                  <SelectValue placeholder="Default style" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(templatesQ.data || []).map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                      {t.is_default ? " · default" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {templateId ? (
+                <button
+                  type="button"
+                  className="shrink-0 text-[12px] font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                  onClick={() => setPreviewTemplateId(templateId)}
+                >
+                  Preview
+                </button>
+              ) : null}
+            </div>
+            <p className="text-[12px] text-[var(--text-subtle)]">
+              Style guide snapshotted when the campaign starts.{" "}
+              <Link href="/settings" className="text-[var(--accent)] underline-offset-2 hover:underline">
+                Manage in Settings
+              </Link>
+            </p>
           </Field>
 
           <Field label="Data mode">
@@ -304,7 +545,9 @@ export function NewCampaignDrawer() {
             <p className="text-[12px] text-[var(--text-muted)]">
               {estimateQ.isLoading
                 ? "Estimating…"
-                : `Estimated ~${formatCredits(estimateQ.data?.total ?? 0)} credits for ${n} leads`}
+                : targetMode === "provided"
+                  ? `Estimated ~${formatCredits(estimateQ.data?.total ?? 0)} credits for your list of ${okCount}`
+                  : `Estimated ~${formatCredits(estimateQ.data?.total ?? 0)} credits for ${n} leads`}
             </p>
           </Field>
 
@@ -357,8 +600,10 @@ export function NewCampaignDrawer() {
                     disabled={disabled}
                     title={
                       value === "gmail_live" && !liveAllowed
-                        ? "Live requires DEMO_MODE=false, ALLOW_LIVE_SENDS, and account live_enabled"
-                        : undefined
+                        ? "Live requires DEMO_MODE=false, ALLOW_LIVE_SENDS=true in .env, and Live enabled on the mail account in Settings"
+                        : value !== "sandbox" && !mailAccountId
+                          ? "Select a verified mail account under Send from first"
+                          : undefined
                     }
                     onClick={() => setSendMode(value)}
                     className={cn(
@@ -375,6 +620,16 @@ export function NewCampaignDrawer() {
               })}
             </div>
             <p className="text-[12px] text-[var(--text-muted)]">{sendModeHelper}</p>
+            {!liveAllowed ? (
+              <p className="text-[11px] text-[var(--text-subtle)]">
+                Live is locked until{" "}
+                <span className="font-mono">DEMO_MODE=false</span>,{" "}
+                <span className="font-mono">ALLOW_LIVE_SENDS=true</span>, and the
+                selected account has Live enabled in Settings. Use{" "}
+                <strong>Gmail test</strong> to send via your real account to allowlisted
+                addresses only.
+              </p>
+            ) : null}
             {sendMode === "gmail_live" && selectedAccount ? (
               <Input
                 className="mt-2 h-8 rounded-[6px] font-mono"
@@ -460,7 +715,19 @@ export function NewCampaignDrawer() {
           </Button>
         </SheetFooter>
       </SheetContent>
+
     </Sheet>
+      {previewTemplateId ? (
+        <EmailTemplatesSection
+          openId={previewTemplateId}
+          readOnly
+          sheetOnly
+          onOpenChange={(o) => {
+            if (!o) setPreviewTemplateId(null);
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 

@@ -34,11 +34,28 @@ def sender_node(state: dict[str, Any]) -> dict[str, Any]:
         if not step1:
             continue
         try:
+            from app.agents.email_writer import personalize_copy
+
+            companies = {
+                c["id"]: c
+                for c in (state.get("companies") or [])
+                if isinstance(c, dict) and c.get("id")
+            }
+            company = companies.get(contact.get("company_id") or "") or {}
+            seller = state.get("seller") or {}
+            subj, body = personalize_copy(
+                str(choice.get("subject") or step1.get("subject") or ""),
+                str(choice.get("body") or step1.get("body") or ""),
+                contact_name=str(contact.get("name") or ""),
+                company_name=str(company.get("name") or ""),
+                role=str(contact.get("title") or ""),
+                seller_name=str(seller.get("company_name") or ""),
+            )
             result = send(
                 lead_id=lead_id,
                 step=1,
-                subject=str(step1.get("subject") or ""),
-                body=str(step1.get("body") or ""),
+                subject=subj,
+                body=body,
                 to_email=str(contact.get("email") or f"{lead_id}@unknown.local"),
                 email_confidence=str(contact.get("email_confidence") or "none"),
                 allow_guessed=bool(choice.get("allow_guessed")),

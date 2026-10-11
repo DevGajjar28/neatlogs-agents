@@ -204,6 +204,17 @@ CREATE TABLE IF NOT EXISTS mail_send_log (
     domain TEXT NOT NULL,
     ts TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS email_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    content_md TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    is_system INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 TABLES = (
@@ -224,6 +235,7 @@ TABLES = (
     "email_decisions",
     "mail_accounts",
     "mail_send_log",
+    "email_templates",
 )
 
 _CAMPAIGN_COLS = {
@@ -294,3 +306,10 @@ def init_db(db_path: str | Path) -> None:
         conn.commit()
     finally:
         conn.close()
+    # Seed system default template (lazy import avoids circular deps at module load)
+    try:
+        from app.infra.email_templates import seed_default_template
+
+        seed_default_template(db_path)
+    except Exception:
+        pass

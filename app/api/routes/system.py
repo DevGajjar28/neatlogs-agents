@@ -88,5 +88,5 @@ def system_status() -> SystemStatusOut:
 
 @router.post("/estimate", response_model=EstimateOut)
 def estimate(body: EstimateIn) -> EstimateOut:
-    out = estimate_campaign(body.n, body.mode)
+    out = estimate_campaign(body.n, body.mode, target_mode=body.target_mode)
     return EstimateOut(total=float(out["total"]), by_step=list(out["by_step"]))

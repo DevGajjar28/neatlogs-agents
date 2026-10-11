@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
 import { Mono } from "@/components/common/Mono";
 import { CardSkeleton } from "@/components/common/Skeletons";
+import { EmailTemplatesSection } from "@/components/mail/EmailTemplatesSection";
 import { MailAccountsSection } from "@/components/mail/MailAccountsSection";
 import { PoliciesCard } from "@/components/mail/PoliciesCard";
 import { PageTitle } from "@/components/shell/page-title";
@@ -67,6 +68,8 @@ export default function SettingsPage() {
         ) : null}
 
         <MailAccountsSection liveAllowed={liveAllowed} />
+
+        <EmailTemplatesSection />
 
         <div
           className={cn(

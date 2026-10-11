@@ -312,14 +312,15 @@ def _check_all_conn(conn, ctx: PolicyContext, settings) -> PolicyResult:
         if reply:
             return _fail("policy.lead_closed", str(reply["kind"]))
 
-    # 15. Content
+    # 15. Content — block any ev_ id in any wrapper (docs/13 + docs/12)
+    from app.agents.evidence_refs import find_refs
+
+    if find_refs(f"{ctx.subject}\n{ctx.body}"):
+        return _fail("policy.content", "internal_ref")
     subject = strip_citations(ctx.subject)
     body = strip_citations(ctx.body)
-    if "[ev_" in (ctx.subject + ctx.body).lower():
-        # after strip still check originals had unresolved? strip removes them — check remaining
-        pass
-    if re.search(r"\[ev_", subject + body, re.I):
-        return _fail("policy.content", "citation_markers")
+    if find_refs(f"{subject}\n{body}"):
+        return _fail("policy.content", "internal_ref")
     if not has_opt_out_line(body) and "unsubscribe" not in body.lower():
         # compose will add footer; require length limits here on raw
         pass

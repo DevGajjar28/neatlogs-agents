@@ -169,6 +169,11 @@ def run_campaign(campaign_id: str = typer.Argument(..., help="Campaign id create
         mode=meta["mode"],
         chaos=meta["chaos"],
         narrow_icp=meta["narrow_icp"],
+        target_mode=meta.get("target_mode") or "discover",
+        provided_companies=meta.get("provided_companies") or [],
+        template_id=meta.get("template_id"),
+        template_name=meta.get("template_name"),
+        template_snapshot=meta.get("template_snapshot"),
         kind="start",
         fresh=True,
     )
@@ -719,6 +724,150 @@ def gen_key() -> None:
     from app.mail.crypto import generate_key
 
     typer.echo(generate_key())
+
+
+@app.command("parse-companies")
+def parse_companies_cmd(
+    csv_path: str = typer.Argument(..., help="Path to CSV with company_name, website, description"),
+) -> None:
+    """Parse a company-list CSV and print ok_count + per-row status (no network)."""
+    from pathlib import Path
+
+    from app.infra.company_list import parse_companies_csv
+
+    text = Path(csv_path).read_text(encoding="utf-8")
+    parsed = parse_companies_csv(text)
+    typer.echo(f"ok_count={parsed['ok_count']}")
+    for row in parsed.get("rows") or []:
+        typer.echo(
+            f"{row.get('status')}\t{row.get('domain') or '-'}\t{row.get('name') or '-'}\t{row.get('reason') or ''}"
+        )
+
+
+@app.command("fix-drafts")
+def fix_drafts(
+    campaign_id: str = typer.Argument(..., help="Campaign whose drafts may contain ev_ ids"),
+) -> None:
+    """Strip leaked evidence ids from pending drafts and unsent email rows; re-verify."""
+    from dotenv import load_dotenv
+
+    from app.agents.evidence_refs import find_refs, strip_refs
+    from app.agents.verifier import verify_draft
+    from app.api import state_reader
+    from app.config import clear_settings_cache, get_settings
+    from app.infra.db import connect, init_db
+    from app.models import Contact, DraftClaim, EmailDraft, EvidenceCard
+
+    load_dotenv(override=False)
+    clear_settings_cache()
+    settings = get_settings()
+    init_db(settings.db_path)
+
+    drafts_all = state_reader.drafts(campaign_id)
+    contacts = {c["id"]: c for c in state_reader.contacts(campaign_id) if isinstance(c, dict)}
+    accounts = state_reader.accounts(campaign_id)
+    changed = 0
+    for contact_id, seq in list(drafts_all.items()):
+        if not isinstance(seq, list):
+            continue
+        new_seq: list[dict] = []
+        for step in seq:
+            if not isinstance(step, dict):
+                continue
+            subj = str(step.get("subject") or "")
+            body = str(step.get("body") or "")
+            refs = find_refs(f"{subj}\n{body}")
+            if refs:
+                step = dict(step)
+                step["subject"] = strip_refs(subj)
+                step["body"] = strip_refs(body)
+                claims = [DraftClaim.model_validate(c) for c in (step.get("claims") or []) if isinstance(c, dict)]
+                for sentence in body.split(". "):
+                    ids = find_refs(sentence)
+                    if ids:
+                        clean = strip_refs(sentence).strip().rstrip(".")
+                        if clean and not any(c.text == clean for c in claims):
+                            claims.append(DraftClaim(text=clean, evidence_ids=ids))
+                step["claims"] = [c.model_dump(mode="json") for c in claims]
+                cited = list(step.get("cited_evidence_ids") or [])
+                for rid in refs:
+                    if rid not in cited:
+                        cited.append(rid)
+                step["cited_evidence_ids"] = cited
+                changed += 1
+            # Deterministic re-verify
+            contact_raw = contacts.get(contact_id) or {}
+            account = accounts.get(contact_raw.get("company_id") or "") or {}
+            evidence = [
+                EvidenceCard.model_validate(e)
+                for e in (account.get("evidence") or [])
+                if isinstance(e, dict)
+            ]
+            try:
+                draft = EmailDraft.model_validate(step)
+                contact = Contact.model_validate(
+                    {
+                        "id": contact_id,
+                        "company_id": contact_raw.get("company_id") or "",
+                        "name": contact_raw.get("name") or "Contact",
+                        "title": contact_raw.get("title") or "",
+                        "role_kind": contact_raw.get("role_kind") or "champion",
+                        "email": contact_raw.get("email"),
+                        "email_source": contact_raw.get("email_source") or "none",
+                        "email_confidence": contact_raw.get("email_confidence") or "none",
+                        "profile_url": contact_raw.get("profile_url"),
+                    }
+                )
+                result = verify_draft(draft, evidence=evidence, contact=contact, use_llm=False)
+                typer.echo(
+                    f"contact={contact_id} step={step.get('step')} "
+                    f"refs_fixed={bool(refs)} passed={result.passed} issues={result.issues}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                typer.echo(f"contact={contact_id} verify_error={exc}", err=True)
+            new_seq.append(step)
+        drafts_all[contact_id] = new_seq
+
+    if changed or drafts_all:
+        state_reader.update_drafts(campaign_id, drafts_all)
+
+    conn = connect(settings.db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT e.id, e.subject, e.body, e.delivery_status, e.sent_at
+            FROM emails e
+            JOIN leads l ON l.id = e.lead_id
+            WHERE l.campaign_id = ?
+            """,
+            (campaign_id,),
+        ).fetchall()
+        email_fixed = 0
+        for r in rows:
+            if r["sent_at"] or (r["delivery_status"] or "") in {"sent", "drafted", "unknown"}:
+                continue
+            subj, body = r["subject"] or "", r["body"] or ""
+            if find_refs(f"{subj}\n{body}"):
+                conn.execute(
+                    "UPDATE emails SET subject = ?, body = ? WHERE id = ?",
+                    (strip_refs(subj), strip_refs(body), r["id"]),
+                )
+                email_fixed += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+    typer.echo(f"campaign_id={campaign_id} draft_steps_fixed={changed} email_rows_fixed={email_fixed}")
+    leftover = 0
+    for seq in drafts_all.values():
+        for step in seq or []:
+            if isinstance(step, dict) and find_refs(
+                f"{step.get('subject') or ''}\n{step.get('body') or ''}"
+            ):
+                leftover += 1
+    if leftover:
+        typer.echo(f"warning={leftover} steps still contain ev_ ids", err=True)
+        raise typer.Exit(code=1)
 
 
 mail_app = typer.Typer(help="Mail account controls")

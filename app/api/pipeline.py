@@ -74,6 +74,10 @@ def campaign_pipeline(campaign_id: str) -> PipelineOut:
     init_db(settings.db_path)
     conn = connect(settings.db_path)
     try:
+        camp = conn.execute(
+            "SELECT options_json, input_json FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        ).fetchone()
         stage_rows = {
             r["stage"]: dict(r)
             for r in conn.execute(
@@ -98,9 +102,25 @@ def campaign_pipeline(campaign_id: str) -> PipelineOut:
     finally:
         conn.close()
 
+    target_mode = "discover"
+    if camp:
+        import json
+
+        opts = json.loads(camp["options_json"] or "{}")
+        inp = json.loads(camp["input_json"] or "{}")
+        target_mode = str(opts.get("target_mode") or inp.get("target_mode") or "discover")
+    provided = target_mode == "provided"
+
     agents: list[PipelineAgentOut] = []
     for spec in PIPELINE_AGENTS:
-        stages = spec["stages"]
+        stages = list(spec["stages"])
+        label = spec["label"]
+        event_agents = set(spec["event_agents"])
+        if spec["agent"] == "buyer_finder" and provided:
+            label = "Your list"
+            stages = ["buyers"]  # import only; no ICP stage
+            event_agents = {"buyer_finder"}
+
         statuses = []
         count_label = None
         updated_at = None
@@ -124,7 +144,6 @@ def campaign_pipeline(campaign_id: str) -> PipelineOut:
                 count_label = row["count_label"]
                 break
 
-        event_agents = spec["event_agents"]
         detail = None
         started_at = None
         latest_ts = None
@@ -146,7 +165,7 @@ def campaign_pipeline(campaign_id: str) -> PipelineOut:
         agents.append(
             PipelineAgentOut(
                 agent=spec["agent"],
-                label=spec["label"],
+                label=label,
                 status=status,  # type: ignore[arg-type]
                 detail=detail,
                 count_label=count_label,
