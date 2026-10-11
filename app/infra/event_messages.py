@@ -7,6 +7,7 @@ from typing import Any
 # type -> str.format template (unknown keys ignored via safe_format)
 TEMPLATES: dict[str, str] = {
     "plan.start": "Campaign started for up to {n} leads.",
+    "planner.assigned": 'Handed "{task}" to {agent}.',
     "plan.reduce_n": "Budget tight — reducing target leads to {n}.",
     "plan.search_thin": "Company search was thin; planner may widen the ICP.",
     "plan.replace_no_contact": "Some companies had no contact; promoting buffer companies.",

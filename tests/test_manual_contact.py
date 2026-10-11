@@ -171,6 +171,8 @@ def test_add_manual_contact_writes_drafts(db, monkeypatch):
     assert updates[0]["drafts"]
     assert updates[0]["extras"]["pending_email_approval"]["type"] == "email_approval"
     assert updates[0]["extras"]["pending_email_approval"]["items"]
+    assert updates[0]["plan"]["next"] == "done"
+    assert updates[0]["plan"]["phase"] == "awaiting_approval"
 
     # No Crustdata: preview stub only; ensure contact source is user
     contact = updates[0]["contacts"][0]

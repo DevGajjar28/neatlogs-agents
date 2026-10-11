@@ -56,12 +56,22 @@ def test_pipeline_six_agents_idle(tmp_path, monkeypatch):
 
     pipe = campaign_pipeline("pipe-1")
     assert len(pipe.agents) == 6
+    assert pipe.target_mode == "discover"
+    assert pipe.model == "Amazon Bedrock"
     assert [a.agent for a in pipe.agents] == [
         "planner",
         "product_researcher",
         "buyer_finder",
         "account_researcher",
         "email_writer_verifier",
+        "sender",
+    ]
+    assert [a.key for a in pipe.agents] == [
+        "planner",
+        "product",
+        "buyers",
+        "accounts",
+        "writer",
         "sender",
     ]
     assert all(a.status == "idle" for a in pipe.agents)

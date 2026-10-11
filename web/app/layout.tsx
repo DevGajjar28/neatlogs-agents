@@ -5,6 +5,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
+import "@/components/campaign/agent-pipeline.css";
 
 export const metadata: Metadata = {
   title: "SignalSDR",

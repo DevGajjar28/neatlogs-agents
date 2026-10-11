@@ -82,11 +82,41 @@ def update_drafts(campaign_id: str, drafts: dict[str, Any]) -> None:
 
 
 def update_values(campaign_id: str, patch: dict[str, Any]) -> None:
-    """Merge fields into the LangGraph checkpoint and invalidate cache."""
+    """Merge fields into the LangGraph checkpoint and invalidate cache.
+
+    Never set ``plan.next`` to a node the planner cannot route to (e.g.
+    approval_gate) — that makes ``update_state`` raise KeyError. Prefer a real
+    graph node for ``as_node`` when LangGraph needs one (``__end__`` is invalid).
+    """
+    # Sanitize plan.next — planner conditional edges only accept these.
+    plan = patch.get("plan")
+    if isinstance(plan, dict):
+        nxt = str(plan.get("next") or "done")
+        allowed = {
+            "product_researcher",
+            "buyer_propose_icp",
+            "icp_gate",
+            "buyer_search",
+            "buyer_import",
+            "account_researcher",
+            "email_writer",
+            "done",
+        }
+        if nxt not in allowed:
+            plan = dict(plan)
+            plan["next"] = "done"
+            patch = {**patch, "plan": plan}
+
     conn, checkpointer = open_checkpointer()
     try:
         graph = build_graph(checkpointer)
-        graph.update_state(run_config(campaign_id), patch)
+        cfg = run_config(campaign_id)
+        # Same pattern as update_drafts (no as_node). If the checkpoint requires
+        # one, attribute to "sender" — a real node that only continues to planner.
+        try:
+            graph.update_state(cfg, patch)
+        except Exception:
+            graph.update_state(cfg, patch, as_node="sender")
     finally:
         conn.close()
     invalidate(campaign_id)

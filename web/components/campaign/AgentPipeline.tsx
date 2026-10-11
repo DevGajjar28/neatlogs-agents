@@ -1,23 +1,28 @@
 "use client";
 
-import {
-  AlertCircle,
-  CheckCircle2,
-  Circle,
-  Clock,
-  Mail,
-  Map,
-  Search,
-  Send,
-  Sparkles,
-  Users,
-} from "lucide-react";
+/**
+ * Shared pipeline UI primitives (scenes, StatusPill, StreamLine, hooks).
+ * Horizontal / stacked cards are the mobile fallback; desktop uses AgentPipelineCanvas.
+ */
+
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { Circle, Mail, Map as MapIcon, Search, Send, Sparkles, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { PipelineAgent } from "@/lib/api";
+import {
+  AGENT_ROLES,
+  elapsedLabel,
+  prefersReducedMotion,
+  type PipelineAgent,
+  type PipelineKey,
+  type PipelineStatus,
+} from "@/lib/pipeline";
 import { cn } from "@/lib/utils";
 
+export type { PipelineAgent };
+
 const ICONS: Record<PipelineAgent["agent"], LucideIcon> = {
-  planner: Map,
+  planner: MapIcon,
   product_researcher: Search,
   buyer_finder: Users,
   account_researcher: Sparkles,
@@ -25,126 +30,764 @@ const ICONS: Record<PipelineAgent["agent"], LucideIcon> = {
   sender: Send,
 };
 
-const STATUS_META: Record<
-  PipelineAgent["status"],
-  { label: string; className: string; Icon: LucideIcon; dot: string }
-> = {
-  idle: {
-    label: "Idle",
-    className: "bg-[var(--surface-muted)] text-[var(--text-subtle)]",
-    Icon: Circle,
-    dot: "bg-[var(--text-subtle)]",
-  },
-  running: {
-    label: "Running",
-    className: "bg-[var(--status-info-soft)] text-[var(--status-info)]",
-    Icon: Circle,
-    dot: "bg-[var(--accent)] animate-pipeline-pulse",
-  },
-  waiting: {
-    label: "Waiting",
-    className: "bg-[var(--status-warning-soft)] text-[var(--status-warning)]",
-    Icon: Clock,
-    dot: "bg-[var(--status-warning)]",
-  },
-  done: {
-    label: "Done",
-    className: "bg-[var(--status-success-soft)] text-[var(--status-success)]",
-    Icon: CheckCircle2,
-    dot: "bg-[var(--status-success)]",
-  },
-  failed: {
-    label: "Failed",
-    className: "bg-[var(--status-danger-soft)] text-[var(--status-danger)]",
-    Icon: AlertCircle,
-    dot: "bg-[var(--status-danger)]",
-  },
+const PILL_TEXT: Record<PipelineStatus, string> = {
+  idle: "Queued",
+  running: "Working",
+  waiting: "Needs you",
+  done: "Done",
+  failed: "Failed",
 };
 
-type Props = {
+export function useReducedMotion(): boolean {
+  const [reduce, setReduce] = useState(false);
+  useEffect(() => {
+    setReduce(prefersReducedMotion());
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setReduce(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduce;
+}
+
+/** Typewriter for detail while running; pass-through for stream. */
+export function useStreamText(
+  status: PipelineStatus,
+  detail: string | null | undefined,
+  stream: string | null | undefined,
+): { text: string; live: boolean; streaming: boolean } {
+  const [typed, setTyped] = useState("");
+  const reduce = useReducedMotion();
+  const source = stream || detail || "";
+
+  useEffect(() => {
+    if (stream) {
+      setTyped(stream.slice(-150));
+      return;
+    }
+    if (status !== "running" || reduce || !detail) {
+      setTyped(detail || "");
+      return;
+    }
+    setTyped("");
+    let i = 0;
+    const id = window.setInterval(() => {
+      i = Math.min(detail.length, i + 2);
+      setTyped(detail.slice(0, i));
+      if (i >= detail.length) window.clearInterval(id);
+    }, 22);
+    return () => window.clearInterval(id);
+  }, [detail, stream, status, reduce]);
+
+  const idleMsg = "Waiting for the planner to hand over this job.";
+  if (status === "idle" && !source) {
+    return { text: idleMsg, live: false, streaming: false };
+  }
+  if (status === "waiting" && !source) {
+    return { text: "Review drafts before send.", live: false, streaming: false };
+  }
+  return {
+    text: typed || source,
+    live: status === "running",
+    streaming: Boolean(stream) && status === "running",
+  };
+}
+
+export function StatusPill({ status }: { status: PipelineStatus }) {
+  return (
+    <span className={cn("ap-pill", `ap-pill-${status}`)}>
+      <span
+        className={cn("ap-pill-dot", status === "running" && "pulse")}
+        aria-hidden
+      />
+      {PILL_TEXT[status]}
+    </span>
+  );
+}
+
+export function StreamLine({
+  status,
+  detail,
+  stream,
+  compact,
+}: {
+  status: PipelineStatus;
+  detail?: string | null;
+  stream?: string | null;
+  compact?: boolean;
+}) {
+  const { text, live, streaming } = useStreamText(status, detail, stream);
+  const label = live ? (streaming ? "● Streaming" : "● Live") : "Latest";
+  return (
+    <div className="ap-stream">
+      <div className={cn("ap-stream-label", live && "live")}>{label}</div>
+      <p className={cn(compact ? "line-clamp-1" : "line-clamp-3")}>
+        {text}
+        {live ? <span className="ap-stream-caret" aria-hidden /> : null}
+      </p>
+      <span className="ap-sr-only" aria-live="polite">
+        {detail || stream || text}
+      </span>
+    </div>
+  );
+}
+
+export function ProgressBar({
+  status,
+  progress,
+}: {
+  status: PipelineStatus;
+  progress?: { done: number; total: number | null } | null;
+}) {
+  const indet = status === "running" && (!progress || progress.total == null);
+  const pct =
+    progress && progress.total && progress.total > 0
+      ? Math.min(100, Math.round((progress.done / progress.total) * 100))
+      : status === "done"
+        ? 100
+        : 0;
+  return (
+    <div className={cn("ap-progress", indet && "indet")} aria-hidden>
+      <i style={indet ? undefined : { width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/* ─── Scenes (SVG viewBox 200×80) ─── */
+
+function SceneBox({
+  status,
+  running,
+  className,
+  children,
+}: {
+  status: PipelineStatus;
+  running: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn("ap-scene", status === "idle" && "dim", className)}
+      aria-hidden
+    >
+      <svg
+        viewBox="0 0 200 80"
+        className={running ? "ap-anim" : undefined}
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {children}
+      </svg>
+    </div>
+  );
+}
+
+export function PlannerOrbit({
+  agents,
+  size = 56,
+}: {
+  agents: PipelineAgent[];
+  size?: number;
+}) {
+  const running = agents.some((a) => a.status === "running");
+  const reduce = useReducedMotion();
+  const seeds = agents.filter((a) => a.key !== "planner").slice(0, 5);
+  const angles = [270, 342, 54, 126, 198];
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 72 72"
+      aria-hidden
+      className={running && !reduce ? "ap-anim" : undefined}
+    >
+      <circle
+        cx="36"
+        cy="36"
+        r="28"
+        fill="none"
+        className="ap-stroke-border"
+        strokeWidth="1.5"
+        strokeDasharray="3 3"
+      />
+      <circle cx="36" cy="36" r="15" className="ap-fill-accent-soft ap-stroke-accent" strokeWidth="1.5" />
+      <g className={running && !reduce ? "ap-orbit" : undefined}>
+        {seeds.map((a, i) => {
+          const ang = ((angles[i] ?? 0) * Math.PI) / 180;
+          const r = a.status === "running" ? 5 : 3.5;
+          const cx = 36 + Math.cos(ang) * 28;
+          const cy = 36 + Math.sin(ang) * 28;
+          const fill =
+            a.status === "running"
+              ? "ap-fill-accent"
+              : a.status === "waiting"
+                ? "ap-fill-warning"
+                : a.status === "done"
+                  ? "ap-fill-success"
+                  : a.status === "failed"
+                    ? "ap-fill-danger"
+                    : "ap-fill-subtle";
+          return (
+            <g key={a.key}>
+              {a.status === "running" ? (
+                <line
+                  x1="36"
+                  y1="36"
+                  x2={cx}
+                  y2={cy}
+                  className="ap-stroke-accent ap-dash"
+                  strokeWidth="1"
+                  strokeDasharray="3 3"
+                />
+              ) : null}
+              <circle
+                cx={cx}
+                cy={cy}
+                r={r}
+                className={fill}
+                fillOpacity={a.status === "idle" ? 0.35 : 1}
+                stroke={a.status === "idle" ? "var(--ap-text-subtle)" : undefined}
+                strokeWidth={a.status === "idle" ? 1 : 0}
+              />
+            </g>
+          );
+        })}
+      </g>
+      <path
+        d="M28 40h16M32 34l8 6-8 6"
+        fill="none"
+        stroke="var(--ap-accent)"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function ProductScene({
+  status,
+  items,
+  progress,
+  tall,
+  inspector,
+}: {
+  status: PipelineStatus;
+  items?: string[] | null;
+  progress?: { done: number; total: number | null } | null;
+  tall?: boolean;
+  inspector?: boolean;
+}) {
+  const running = status === "running";
+  const found = Math.min(3, progress?.done ?? items?.length ?? 0);
+  return (
+    <SceneBox
+      status={status}
+      running={running}
+      className={cn(tall && "tall", inspector && "inspector")}
+    >
+      <rect x="8" y="10" width="96" height="60" rx="4" className="ap-fill-surface ap-stroke-border" strokeWidth="1" />
+      <circle cx="18" cy="20" r="2" className="ap-fill-danger" />
+      <circle cx="26" cy="20" r="2" className="ap-fill-warning" />
+      <circle cx="34" cy="20" r="2" className="ap-fill-success" />
+      <rect x="14" y="28" width="50" height="4" rx="1" className="ap-fill-border" />
+      <rect x="14" y="36" width="70" height="4" rx="1" className="ap-fill-border" />
+      <rect x="14" y="44" width="40" height="18" rx="2" className="ap-fill-muted" />
+      {running ? (
+        <rect x="10" y="14" width="92" height="2" className="ap-fill-accent ap-scan" />
+      ) : null}
+      {[0, 1, 2].map((i) => {
+        const y = 18 + i * 18;
+        const ok = i < found;
+        const label = (items?.[i] || "").slice(0, 12);
+        return (
+          <g key={i}>
+            <line
+              x1="104"
+              y1={40}
+              x2="118"
+              y2={y + 8}
+              className={ok ? "ap-stroke-accent" : "ap-stroke-border"}
+              strokeWidth="1"
+            />
+            <rect
+              x="118"
+              y={y}
+              width="72"
+              height="16"
+              rx="3"
+              className={ok ? "ap-fill-accent-soft ap-stroke-accent" : "ap-fill-surface ap-stroke-border"}
+              strokeWidth="1"
+              strokeDasharray={ok ? undefined : "3 2"}
+              style={running && !ok ? { animation: "ap-slot 1.4s ease-in-out infinite" } : undefined}
+            />
+            {ok && label ? (
+              <text x="122" y={y + 11} fontSize="8.5" fontFamily="var(--ap-mono)" fill="var(--ap-accent)">
+                {label}
+              </text>
+            ) : null}
+          </g>
+        );
+      })}
+    </SceneBox>
+  );
+}
+
+export function BuyersScene({
+  status,
+  progress,
+  listMode,
+  tall,
+  inspector,
+}: {
+  status: PipelineStatus;
+  progress?: { done: number; total: number | null } | null;
+  listMode?: boolean;
+  tall?: boolean;
+  inspector?: boolean;
+}) {
+  const running = status === "running";
+  const total = Math.min(30, progress?.total ?? 30);
+  const kept = Math.min(total, progress?.done ?? 0);
+  const cols = 10;
+  const rows = 3;
+  const dots = Array.from({ length: cols * rows }, (_, i) => i);
+  return (
+    <SceneBox
+      status={status}
+      running={running}
+      className={cn(tall && "tall", inspector && "inspector")}
+    >
+      {dots.map((i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = 20 + col * 16;
+        const y = 18 + row * 18;
+        const solid = i < kept;
+        if (listMode) {
+          return (
+            <rect
+              key={i}
+              x={x - 3}
+              y={y - 3}
+              width="6"
+              height="6"
+              rx="1"
+              className={solid ? "ap-fill-accent ap-wave" : "ap-fill-subtle ap-wave"}
+              style={{ ["--d" as string]: i }}
+              opacity={solid ? 1 : 0.4}
+            />
+          );
+        }
+        return (
+          <circle
+            key={i}
+            cx={x}
+            cy={y}
+            r="3"
+            className={solid ? "ap-fill-accent ap-wave" : "ap-fill-subtle ap-wave"}
+            style={{ ["--d" as string]: i }}
+            opacity={solid ? 1 : 0.4}
+          />
+        );
+      })}
+      {running ? (
+        <rect x="16" y="12" width="2" height="56" className="ap-fill-accent ap-sweep" />
+      ) : null}
+    </SceneBox>
+  );
+}
+
+export function AccountsScene({
+  status,
+  progress,
+  tall,
+  inspector,
+}: {
+  status: PipelineStatus;
+  progress?: { done: number; total: number | null } | null;
+  tall?: boolean;
+  inspector?: boolean;
+}) {
+  const running = status === "running";
+  const found = Math.min(6, progress?.done ?? 0);
+  const people = Array.from({ length: 6 }, (_, i) => i);
+  return (
+    <SceneBox
+      status={status}
+      running={running}
+      className={cn(tall && "tall", inspector && "inspector")}
+    >
+      {running ? (
+        <circle cx="100" cy="40" r="13" className="ap-stroke-accent ap-ring" fill="none" strokeWidth="1.5" />
+      ) : null}
+      <rect x="90" y="28" width="20" height="24" rx="2" className="ap-fill-accent-soft ap-stroke-accent" strokeWidth="1.5" />
+      <rect x="94" y="32" width="5" height="5" className="ap-fill-accent" />
+      <rect x="101" y="32" width="5" height="5" className="ap-fill-accent" />
+      <rect x="94" y="40" width="12" height="8" className="ap-fill-accent" opacity="0.5" />
+      {people.map((i) => {
+        const ang = ((i * 60 - 90) * Math.PI) / 180;
+        const cx = 100 + Math.cos(ang) * 48;
+        const cy = 40 + Math.sin(ang) * 26;
+        const ok = i < found;
+        return (
+          <g key={i}>
+            <line
+              x1="100"
+              y1="40"
+              x2={cx}
+              y2={cy}
+              className={ok ? "ap-stroke-accent" : "ap-stroke-border ap-dash"}
+              strokeWidth="1"
+              strokeDasharray={ok ? undefined : "3 3"}
+            />
+            <circle
+              cx={cx}
+              cy={cy}
+              r="5"
+              className={ok ? "ap-fill-accent" : "ap-fill-surface ap-stroke-border"}
+              strokeWidth="1"
+            />
+          </g>
+        );
+      })}
+    </SceneBox>
+  );
+}
+
+export function WriterScene({
+  status,
+  progress,
+  tall,
+  inspector,
+}: {
+  status: PipelineStatus;
+  progress?: { done: number; total: number | null } | null;
+  tall?: boolean;
+  inspector?: boolean;
+}) {
+  const running = status === "running";
+  const done = status === "done";
+  const waiting = status === "waiting";
+  const checked = progress?.done ?? 0;
+  const total = progress?.total ?? 0;
+  return (
+    <SceneBox
+      status={status}
+      running={running}
+      className={cn(tall && "tall", inspector && "inspector")}
+    >
+      <rect x="12" y="12" width="70" height="56" rx="3" className="ap-fill-surface ap-stroke-border" strokeWidth="1" />
+      <rect x="18" y="18" width="28" height="10" rx="2" className="ap-fill-accent-soft ap-stroke-accent" strokeWidth="1" />
+      <text x="22" y="25" fontSize="7" fill="var(--ap-accent)">
+        To
+      </text>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <rect
+          key={i}
+          x="18"
+          y={34 + i * 6}
+          width={50 - i * 4}
+          height="3"
+          rx="1"
+          className="ap-fill-border ap-type"
+          style={{ ["--i" as string]: i }}
+        />
+      ))}
+      <path d="M90 40 H118" className="ap-stroke-accent" strokeWidth="1.5" markerEnd="url(#ap-arrow)" />
+      {running ? <circle cx="90" cy="40" r="3" className="ap-fill-accent ap-hop" /> : null}
+      <defs>
+        <marker id="ap-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" className="ap-fill-accent" />
+        </marker>
+      </defs>
+      <circle
+        cx="148"
+        cy="40"
+        r="22"
+        className={
+          done
+            ? "ap-fill-success-soft ap-stroke-success"
+            : waiting
+              ? "ap-fill-warning-soft ap-stroke-warning"
+              : "ap-fill-accent-soft ap-stroke-accent"
+        }
+        strokeWidth="1.5"
+        fill={done ? "var(--ap-success-soft)" : waiting ? "var(--ap-warning-soft)" : "var(--ap-accent-soft)"}
+      />
+      {running ? (
+        <circle
+          cx="148"
+          cy="40"
+          r="14"
+          fill="none"
+          className="ap-stroke-accent ap-spin"
+          strokeWidth="1.5"
+          strokeDasharray="6 4"
+        />
+      ) : null}
+      {done ? (
+        <path d="M138 40 l6 6 12-14" fill="none" className="ap-stroke-success" strokeWidth="2" />
+      ) : waiting ? (
+        <path d="M148 30 v12 h8" fill="none" className="ap-stroke-warning" strokeWidth="2" />
+      ) : null}
+      {total > 0 ? (
+        <text x="136" y="72" fontSize="8" fontFamily="var(--ap-mono)" fill="var(--ap-text-subtle)">
+          {checked}/{total} checked
+        </text>
+      ) : null}
+    </SceneBox>
+  );
+}
+
+export function SenderScene({
+  status,
+  progress,
+  tall,
+  inspector,
+}: {
+  status: PipelineStatus;
+  progress?: { done: number; total: number | null } | null;
+  tall?: boolean;
+  inspector?: boolean;
+}) {
+  const running = status === "running";
+  const reduce = useReducedMotion();
+  const sent = progress?.done ?? 0;
+  const path = "M40 50 C 80 10, 120 10, 160 50";
+  return (
+    <SceneBox
+      status={status}
+      running={running}
+      className={cn(tall && "tall", inspector && "inspector")}
+    >
+      <rect x="12" y="44" width="36" height="20" rx="2" className="ap-fill-muted ap-stroke-border" strokeWidth="1" />
+      <path d="M12 44 L30 32 L48 44" fill="none" className="ap-stroke-border" strokeWidth="1" />
+      <path
+        id="ap-send-path"
+        d={path}
+        fill="none"
+        className={sent > 0 || status === "done" ? "ap-stroke-accent" : "ap-stroke-border"}
+        strokeWidth="1.5"
+        strokeDasharray={sent > 0 || status === "done" ? undefined : "4 3"}
+      />
+      <rect x="152" y="40" width="36" height="24" rx="3" className="ap-fill-surface ap-stroke-border" strokeWidth="1" />
+      <path d="M152 40 L170 52 L188 40" fill="none" className="ap-stroke-border" strokeWidth="1" />
+      <circle
+        cx="180"
+        cy="36"
+        r="9"
+        className={status === "done" ? "ap-fill-success" : "ap-fill-accent"}
+      />
+      <text x="180" y="39" textAnchor="middle" fontSize="8" fill="#fff" fontFamily="var(--ap-mono)">
+        {sent}
+      </text>
+      {running && !reduce
+        ? [0, 1, 2].map((i) => (
+            <g key={i} opacity="0.9">
+              <polygon points="0,-3 8,0 0,3" className="ap-fill-accent">
+                <animateMotion
+                  dur="2.4s"
+                  begin={`${i * 0.8}s`}
+                  repeatCount="indefinite"
+                  rotate="auto"
+                  path={path}
+                />
+                <animate
+                  attributeName="opacity"
+                  values="0;1;1;0"
+                  keyTimes="0;0.15;0.85;1"
+                  dur="2.4s"
+                  begin={`${i * 0.8}s`}
+                  repeatCount="indefinite"
+                />
+              </polygon>
+            </g>
+          ))
+        : null}
+    </SceneBox>
+  );
+}
+
+export function AgentScene({
+  agentKey,
+  status,
+  items,
+  progress,
+  listMode,
+  tall,
+  inspector,
+}: {
+  agentKey: Exclude<PipelineKey, "gate">;
+  status: PipelineStatus;
+  items?: string[] | null;
+  progress?: { done: number; total: number | null } | null;
+  listMode?: boolean;
+  tall?: boolean;
+  inspector?: boolean;
+}) {
+  switch (agentKey) {
+    case "product":
+      return (
+        <ProductScene
+          status={status}
+          items={items}
+          progress={progress}
+          tall={tall}
+          inspector={inspector}
+        />
+      );
+    case "buyers":
+      return (
+        <BuyersScene
+          status={status}
+          progress={progress}
+          listMode={listMode}
+          tall={tall}
+          inspector={inspector}
+        />
+      );
+    case "accounts":
+      return (
+        <AccountsScene
+          status={status}
+          progress={progress}
+          tall={tall}
+          inspector={inspector}
+        />
+      );
+    case "writer":
+      return (
+        <WriterScene
+          status={status}
+          progress={progress}
+          tall={tall}
+          inspector={inspector}
+        />
+      );
+    case "sender":
+      return (
+        <SenderScene
+          status={status}
+          progress={progress}
+          tall={tall}
+          inspector={inspector}
+        />
+      );
+    default:
+      return null;
+  }
+}
+
+export function AgentIcon({ agent }: { agent: PipelineAgent["agent"] }) {
+  const Icon = ICONS[agent] || Circle;
+  return <Icon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />;
+}
+
+/** Mobile / narrow fallback: stacked cards (§1 ≤640 / §7.6). */
+export function AgentPipelineMobile({
+  agents,
+  listMode,
+  selectedKey,
+  onSelect,
+}: {
+  agents: PipelineAgent[];
+  listMode?: boolean;
+  selectedKey?: string | null;
+  onSelect?: (key: string) => void;
+}) {
+  return (
+    <div className="ap ap-mobile">
+      {agents.map((agent) => {
+        const time = elapsedLabel(agent.started_at, agent.updated_at);
+        return (
+          <button
+            key={agent.key}
+            type="button"
+            aria-pressed={selectedKey === agent.key}
+            aria-label={`${agent.label}: ${PILL_TEXT[agent.status]}. Show its activity`}
+            onClick={() => onSelect?.(agent.key)}
+            className={cn(
+              "ap-card w-full p-3 text-left",
+              `status-${agent.status}`,
+              selectedKey === agent.key && "selected",
+            )}
+          >
+            <div className="ap-mobile-card space-y-2">
+              <div className="flex items-center gap-2">
+                <AgentIcon agent={agent.agent} />
+                <span className="text-[13px] font-semibold">{agent.label}</span>
+                <StatusPill status={agent.status} />
+                {time ? (
+                  <span className="ml-auto text-[11px] text-[var(--ap-text-subtle)]">{time}</span>
+                ) : null}
+              </div>
+              {agent.key !== "planner" ? (
+                <AgentScene
+                  agentKey={agent.key}
+                  status={agent.status}
+                  items={agent.items}
+                  progress={agent.progress}
+                  listMode={listMode}
+                  tall
+                />
+              ) : (
+                <div className="flex items-center gap-3">
+                  <PlannerOrbit agents={agents} size={72} />
+                  <p className="text-[12px] text-[var(--ap-text-muted)]">{AGENT_ROLES.planner}</p>
+                </div>
+              )}
+              <StreamLine status={agent.status} detail={agent.detail} stream={agent.stream} />
+              {agent.status === "waiting" ? (
+                <Link
+                  href="/approvals"
+                  className="text-[12px] font-medium text-[var(--ap-accent)] underline-offset-2 hover:underline"
+                >
+                  Review drafts
+                </Link>
+              ) : agent.count_label ? (
+                <span className="text-[12px] font-medium">{agent.count_label}</span>
+              ) : null}
+              <ProgressBar status={agent.status} progress={agent.progress} />
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** @deprecated Prefer AgentPipelineCanvas; kept as mobile row alias. */
+export function AgentPipeline({
+  agents,
+  onSelectAgent,
+  selectedAgent,
+}: {
   agents: PipelineAgent[];
   onSelectAgent?: (agent: PipelineAgent) => void;
   selectedAgent?: string | null;
-};
+}) {
+  const byAgent = useMemo(() => {
+    const m = new Map(agents.map((a) => [a.agent, a]));
+    return m;
+  }, [agents]);
+  const selectedKey =
+    agents.find((a) => a.agent === selectedAgent)?.key ||
+    (selectedAgent as string | null) ||
+    null;
 
-export function AgentPipeline({ agents, onSelectAgent, selectedAgent }: Props) {
   return (
-    <div className="rounded-[8px] border border-[var(--border)] bg-[var(--surface)] p-4">
-      <h3 className="mb-3 text-[14px] font-semibold">Agent pipeline</h3>
-      <ol className="flex flex-col md:flex-row md:items-stretch">
-        {agents.map((agent, index) => {
-          const Icon = ICONS[agent.agent] || Circle;
-          const meta = STATUS_META[agent.status];
-          const StatusIcon = meta.Icon;
-          const next = agents[index + 1];
-          const connectorDone = agent.status === "done";
-          return (
-            <li
-              key={agent.agent}
-              className="flex min-w-0 flex-1 flex-col md:flex-row md:items-center"
-            >
-              <button
-                type="button"
-                onClick={() => onSelectAgent?.(agent)}
-                className={cn(
-                  "flex w-full min-w-0 flex-1 flex-col gap-1.5 rounded-[6px] border px-3 py-3 text-left transition-colors",
-                  agent.status === "idle" && "border-[var(--border-strong)]",
-                  agent.status === "running" && "border-[var(--accent)] bg-[var(--accent-soft)]",
-                  agent.status === "waiting" &&
-                    "border-[var(--status-warning)] bg-[var(--status-warning-soft)]",
-                  agent.status === "done" && "border-[var(--border)]",
-                  agent.status === "failed" &&
-                    "border-[var(--status-danger)] bg-[var(--status-danger-soft)]",
-                  selectedAgent === agent.agent && "ring-2 ring-[var(--accent)] ring-offset-1",
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <Icon className="size-4 shrink-0 text-[var(--text)]" strokeWidth={1.75} />
-                  <span className="truncate text-[12px] font-semibold text-[var(--text)]">
-                    {agent.label}
-                  </span>
-                </div>
-                <span
-                  className={cn(
-                    "inline-flex w-fit items-center gap-1.5 rounded-[6px] px-1.5 py-0.5 text-[11px] font-medium",
-                    meta.className,
-                  )}
-                >
-                  <span className={cn("size-1.5 shrink-0 rounded-full", meta.dot)} aria-hidden />
-                  <StatusIcon className="size-3 shrink-0" strokeWidth={2} aria-hidden />
-                  {meta.label}
-                </span>
-                <p
-                  className={cn(
-                    "line-clamp-2 min-h-[2.5em] text-[11px] leading-4",
-                    agent.status === "idle" ? "text-[var(--text-subtle)]" : "text-[var(--text-muted)]",
-                  )}
-                >
-                  {agent.status === "idle" ? "—" : agent.detail || "—"}
-                </p>
-                {agent.count_label ? (
-                  <span className="text-[11px] font-medium text-[var(--text)]">
-                    {agent.count_label}
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-[var(--text-subtle)]">&nbsp;</span>
-                )}
-              </button>
-              {next ? (
-                <div
-                  className={cn(
-                    "mx-auto h-3 w-0 border-l-2 md:mx-0 md:h-0 md:w-3 md:border-l-0 md:border-t-2",
-                    connectorDone
-                      ? "border-solid border-[var(--accent)]"
-                      : "border-dashed border-[var(--border-strong)]",
-                  )}
-                  aria-hidden
-                />
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
-    </div>
+    <AgentPipelineMobile
+      agents={agents}
+      selectedKey={selectedKey}
+      onSelect={(key) => {
+        const a = agents.find((x) => x.key === key);
+        if (a) onSelectAgent?.(a);
+        else {
+          const legacy = byAgent.get(key as PipelineAgent["agent"]);
+          if (legacy) onSelectAgent?.(legacy);
+        }
+      }}
+    />
   );
 }

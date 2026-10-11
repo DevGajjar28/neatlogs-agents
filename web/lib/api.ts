@@ -347,15 +347,23 @@ export type PipelineAgent = {
     | "account_researcher"
     | "email_writer_verifier"
     | "sender";
+  key: "planner" | "product" | "buyers" | "accounts" | "writer" | "sender";
   label: string;
   status: "idle" | "running" | "waiting" | "done" | "failed";
   detail?: string | null;
+  stream?: string | null;
   count_label?: string | null;
+  progress?: { done: number; total: number | null } | null;
+  items?: string[] | null;
   started_at?: string | null;
   updated_at?: string | null;
 };
 
-export type PipelineOut = { agents: PipelineAgent[] };
+export type PipelineOut = {
+  target_mode: "discover" | "list";
+  model?: string | null;
+  agents: PipelineAgent[];
+};
 
 export type CampaignEvent = {
   id: number;

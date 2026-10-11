@@ -18,6 +18,11 @@ class StageOut(BaseModel):
     updated_at: datetime | str | None = None
 
 
+class PipelineProgressOut(BaseModel):
+    done: int = 0
+    total: int | None = None
+
+
 class PipelineAgentOut(BaseModel):
     agent: Literal[
         "planner",
@@ -27,15 +32,21 @@ class PipelineAgentOut(BaseModel):
         "email_writer_verifier",
         "sender",
     ]
+    key: Literal["planner", "product", "buyers", "accounts", "writer", "sender"]
     label: str
     status: Literal["idle", "running", "waiting", "done", "failed"]
     detail: str | None = None
+    stream: str | None = None
     count_label: str | None = None
+    progress: PipelineProgressOut | None = None
+    items: list[str] | None = None
     started_at: datetime | str | None = None
     updated_at: datetime | str | None = None
 
 
 class PipelineOut(BaseModel):
+    target_mode: Literal["discover", "list"] = "discover"
+    model: str | None = None
     agents: list[PipelineAgentOut] = Field(default_factory=list)
 
 

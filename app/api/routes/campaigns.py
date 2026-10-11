@@ -1248,10 +1248,12 @@ def add_manual_contact(
             "drafts": drafts,
             "verifier": verifier_map,
             "extras": extras,
+            # next must stay a planner-valid route ("done"). approval_gate is not
+            # reachable from the planner; setting it makes update_state KeyError.
             "plan": {
                 **dict(values.get("plan") or {}),
                 "phase": "awaiting_approval",
-                "next": "approval_gate",
+                "next": "done",
             },
         },
     )

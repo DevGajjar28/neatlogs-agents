@@ -1,0 +1,625 @@
+/* Agent pipeline — tokens + motion from 14_AGENT_PIPELINE_UI.md §6 */
+
+.ap {
+  --ap-bg: #fafafa;
+  --ap-surface: #ffffff;
+  --ap-muted: #f4f4f5;
+  --ap-border: #e4e4e7;
+  --ap-border-strong: #d4d4d8;
+  --ap-text: #18181b;
+  --ap-text-muted: #52525b;
+  --ap-text-subtle: #71717a;
+  --ap-accent: #2563eb;
+  --ap-accent-soft: #eff6ff;
+  --ap-success: #15803d;
+  --ap-success-soft: #f0fdf4;
+  --ap-warning: #b45309;
+  --ap-warning-soft: #fffbeb;
+  --ap-danger: #b91c1c;
+  --ap-danger-soft: #fef2f2;
+  --gap: 24px;
+  --ap-sans: "Geist", "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --ap-mono: "Geist Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--ap-sans);
+  color: var(--ap-text);
+}
+
+@keyframes ap-dispatch {
+  0% {
+    left: 53px;
+    top: 0;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  25% {
+    left: 53px;
+    top: 16px;
+  }
+  80% {
+    left: var(--to);
+    top: 16px;
+  }
+  100% {
+    left: var(--to);
+    top: 32px;
+    opacity: 0;
+  }
+}
+
+@keyframes ap-pkt {
+  0% {
+    left: -3px;
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    left: calc(100% - 3px);
+    opacity: 0;
+  }
+}
+
+@keyframes ap-pkt-v {
+  0% {
+    top: -3px;
+    opacity: 0;
+  }
+  15%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    top: calc(100% - 3px);
+    opacity: 0;
+  }
+}
+
+@keyframes ap-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+  }
+}
+
+@keyframes ap-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes ap-scan {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(46px);
+  }
+}
+
+@keyframes ap-slot {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes ap-wave {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes ap-sweep {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(152px);
+  }
+}
+
+@keyframes ap-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  to {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes ap-dash {
+  from {
+    stroke-dashoffset: 6;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes ap-type {
+  0% {
+    transform: scaleX(0);
+  }
+  35%,
+  85% {
+    transform: scaleX(1);
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0.4;
+  }
+}
+
+@keyframes ap-hop {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  15%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+}
+
+@keyframes ap-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ap-indet {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@keyframes ap-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ap * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.ap-anim .ap-scan {
+  animation: ap-scan 1.6s ease-in-out infinite alternate;
+}
+.ap-anim .ap-slot {
+  animation: ap-slot 1.4s ease-in-out infinite;
+}
+.ap-anim .ap-wave {
+  animation: ap-wave 1.8s ease-in-out infinite;
+  animation-delay: calc(var(--d, 0) * 60ms);
+}
+.ap-anim .ap-sweep {
+  animation: ap-sweep 2.2s linear infinite;
+}
+.ap-anim .ap-ring {
+  animation: ap-ring 1.8s ease-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ap-anim .ap-dash {
+  animation: ap-dash 1s linear infinite;
+}
+.ap-anim .ap-type {
+  animation: ap-type 2.8s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 0.35s);
+  transform-box: fill-box;
+  transform-origin: left center;
+}
+.ap-anim .ap-hop {
+  animation: ap-hop 1.4s ease-in-out infinite;
+}
+.ap-anim .ap-spin {
+  animation: ap-spin 2.4s linear infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ap-anim .ap-orbit {
+  animation: ap-orbit 12s linear infinite;
+  transform-origin: 36px 36px;
+}
+
+.ap-fill-accent {
+  fill: var(--ap-accent);
+}
+.ap-fill-accent-soft {
+  fill: var(--ap-accent-soft);
+}
+.ap-fill-muted {
+  fill: var(--ap-muted);
+}
+.ap-fill-border {
+  fill: var(--ap-border);
+}
+.ap-fill-success {
+  fill: var(--ap-success);
+}
+.ap-fill-success-soft {
+  fill: var(--ap-success-soft);
+}
+.ap-fill-warning {
+  fill: var(--ap-warning);
+}
+.ap-fill-warning-soft {
+  fill: var(--ap-warning-soft);
+}
+.ap-fill-danger {
+  fill: var(--ap-danger);
+}
+.ap-fill-surface {
+  fill: var(--ap-surface);
+}
+.ap-fill-subtle {
+  fill: var(--ap-text-subtle);
+}
+.ap-stroke-accent {
+  stroke: var(--ap-accent);
+}
+.ap-stroke-border {
+  stroke: var(--ap-border-strong);
+}
+.ap-stroke-success {
+  stroke: var(--ap-success);
+}
+.ap-stroke-warning {
+  stroke: var(--ap-warning);
+}
+.ap-stroke-danger {
+  stroke: var(--ap-danger);
+}
+.ap-stroke-subtle {
+  stroke: var(--ap-text-subtle);
+}
+
+.ap-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.ap-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.ap-pill-dot.pulse {
+  animation: ap-pulse 1.4s ease-out infinite;
+}
+.ap-pill-idle {
+  background: var(--ap-muted);
+  color: var(--ap-text-subtle);
+}
+.ap-pill-idle .ap-pill-dot {
+  background: var(--ap-text-subtle);
+}
+.ap-pill-running {
+  background: var(--ap-accent-soft);
+  color: var(--ap-accent);
+}
+.ap-pill-running .ap-pill-dot {
+  background: var(--ap-accent);
+}
+.ap-pill-waiting {
+  background: var(--ap-warning-soft);
+  color: var(--ap-warning);
+}
+.ap-pill-waiting .ap-pill-dot {
+  background: var(--ap-warning);
+}
+.ap-pill-done {
+  background: var(--ap-success-soft);
+  color: var(--ap-success);
+}
+.ap-pill-done .ap-pill-dot {
+  background: var(--ap-success);
+}
+.ap-pill-failed {
+  background: var(--ap-danger-soft);
+  color: var(--ap-danger);
+}
+.ap-pill-failed .ap-pill-dot {
+  background: var(--ap-danger);
+}
+
+.ap-stream {
+  font-family: var(--ap-mono);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ap-text-muted);
+  max-height: 54px;
+  overflow: hidden;
+}
+.ap-stream-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ap-text-subtle);
+  margin-bottom: 2px;
+}
+.ap-stream-label.live {
+  color: var(--ap-accent);
+}
+.ap-stream-caret {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 2px;
+  background: var(--ap-accent);
+  vertical-align: text-bottom;
+  animation: ap-blink 1s steps(1) infinite;
+}
+
+.ap-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ap-muted);
+  overflow: hidden;
+}
+.ap-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--ap-accent);
+  transition: width 0.6s ease;
+}
+.ap-progress.indet > i {
+  width: 30%;
+  animation: ap-indet 1.4s linear infinite;
+}
+
+.ap-scene {
+  border: 1px solid var(--ap-border);
+  border-radius: 6px;
+  background: var(--ap-bg);
+  overflow: hidden;
+  height: 64px;
+}
+.ap-scene.tall {
+  height: 80px;
+}
+.ap-scene.inspector {
+  height: 160px;
+}
+.ap-scene svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.ap-scene.dim {
+  opacity: 0.55;
+}
+
+.ap-card {
+  position: relative;
+  border: 1px solid var(--ap-border);
+  border-radius: 8px;
+  background: var(--ap-surface);
+  transition: border-color 0.2s ease;
+}
+.ap-card.status-idle {
+  background: var(--ap-bg);
+}
+.ap-card.status-running {
+  border-color: var(--ap-accent);
+}
+.ap-card.status-waiting {
+  border-color: var(--ap-warning);
+}
+.ap-card.status-failed {
+  border-color: var(--ap-danger);
+}
+.ap-card.selected {
+  outline: 2px solid var(--ap-accent);
+  outline-offset: 2px;
+}
+
+.ap-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Progress strip — always readable above the canvas */
+.ap-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ap-strip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ap-border);
+  border-radius: 6px;
+  background: var(--ap-surface);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ap-text);
+  max-width: 100%;
+}
+.ap-strip-item.status-running {
+  border-color: var(--ap-accent);
+  background: var(--ap-accent-soft);
+}
+.ap-strip-item.status-waiting {
+  border-color: var(--ap-warning);
+  background: var(--ap-warning-soft);
+}
+.ap-strip-item.status-done {
+  border-color: var(--ap-border);
+}
+.ap-strip-item.status-failed {
+  border-color: var(--ap-danger);
+  background: var(--ap-danger-soft);
+}
+.ap-strip-count {
+  color: var(--ap-text-subtle);
+  font-family: var(--ap-mono);
+  font-size: 10px;
+}
+
+/* React Flow shell — compact so the page stays readable */
+.ap-canvas-shell {
+  position: relative;
+  min-height: 420px;
+  height: 420px;
+  border: 1px solid var(--ap-border);
+  border-radius: 8px;
+  background: var(--ap-surface);
+  overflow: hidden;
+}
+.ap-canvas-shell .react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--ap-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ap-canvas-shell .react-flow__controls-button {
+  background: var(--ap-surface);
+  border-bottom: 1px solid var(--ap-border);
+  fill: var(--ap-text);
+  width: 28px;
+  height: 28px;
+}
+.ap-canvas-shell .react-flow__attribution {
+  display: none;
+}
+
+.ap-layout {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+.ap-layout-canvas {
+  flex: 1;
+  min-width: 0;
+}
+.ap-inspector {
+  width: 340px;
+  flex-shrink: 0;
+  border: 1px solid var(--ap-border);
+  border-radius: 8px;
+  background: var(--ap-surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+  max-height: 420px;
+  position: sticky;
+  top: 16px;
+  overflow: hidden;
+}
+.ap-inspector-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ap-inspector h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ap-text-subtle);
+  text-transform: none;
+  margin: 0 0 8px;
+}
+.ap-inspector-section {
+  border-top: 1px solid var(--ap-border);
+  padding-top: 12px;
+}
+
+.ap-follow-btn {
+  position: absolute;
+  z-index: 5;
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ap-border);
+  border-radius: 6px;
+  background: var(--ap-surface);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ap-text);
+  cursor: pointer;
+}
+.ap-follow-btn[aria-pressed="true"] {
+  border-color: var(--ap-accent);
+  background: var(--ap-accent-soft);
+  color: var(--ap-accent);
+}
+
+.ap-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ap-mobile-card {
+  pointer-events: none;
+}
+.ap-mobile-card a {
+  pointer-events: auto;
+}
+
+@media (max-width: 1279px) {
+  .ap-inspector-desktop {
+    display: none;
+  }
+}
+
+@media (min-width: 1280px) {
+  .ap-inspector-sheet-trigger {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .ap-canvas-desktop {
+    display: none;
+  }
+}

@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ActivityPanel } from "@/components/campaign/ActivityPanel";
 import { AddContactDrawer } from "@/components/campaign/AddContactDrawer";
-import { AgentPipeline } from "@/components/campaign/AgentPipeline";
+import { AgentPipelineCanvas } from "@/components/campaign/AgentPipelineCanvas";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
 import { Mono } from "@/components/common/Mono";
 import { RelativeTime } from "@/components/common/RelativeTime";
@@ -149,9 +149,15 @@ export default function CampaignRunPage() {
             ) : null}
           </div>
 
-          <AgentPipeline
-            agents={pipelineQ.data?.agents || []}
-            selectedAgent={activityAgent?.agent}
+          <AgentPipelineCanvas
+            pipeline={pipelineQ.data}
+            events={eventsQ.data || []}
+            leads={leadsQ.data || []}
+            planFacts={{
+              leads_target: q.data.leads_target,
+              credit_cap: q.data.credit_cap,
+              send_mode: sendMode,
+            }}
             onSelectAgent={(agent) => {
               setActivityAgent(agent);
               setActivityOpen(true);

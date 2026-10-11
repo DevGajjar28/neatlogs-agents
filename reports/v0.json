@@ -1,27 +1,26 @@
 {
-  "campaign_id": "ui-55054ad7af",
+  "campaign_id": "ui-270997852b",
   "seller": "meruksha",
   "n": 1,
   "data_mode": "live",
-  "credits_spent": 2.0,
+  "credits_spent": 0.0,
   "credits_by_step": {
-    "account.enrich": 2.0,
+    "account.enrich": 0.0,
     "account.news_web": 0.0,
     "account.person_search.explain": 0.0,
     "account.person_search.semantic": 0.0,
     "account.person_search": 0.0,
-    "buyer.autocomplete": 0.0,
     "buyers.import_identify": 0.0,
     "doctor": 0.0,
     "product.identify": 0.0
   },
-  "cache_hit_rate": 0.6097560975609756,
-  "cache_hits": 25,
-  "cache_total": 41,
+  "cache_hit_rate": 0.6666666666666666,
+  "cache_hits": 6,
+  "cache_total": 9,
   "tokens": null,
   "llm_cost": null,
   "tokens_note": "unavailable locally; read neatlogs dashboard for the campaign",
-  "wall_clock_seconds": 65.90620255470276,
+  "wall_clock_seconds": 32.945212841033936,
   "companies_found": 1,
   "companies_kept": 0,
   "companies_dropped": 1,
@@ -40,7 +39,7 @@
   "cost_per_qualified_lead": null,
   "qualified_leads": 0,
   "errors": 0,
-  "events": 14,
+  "events": 12,
   "halt_reason": null,
   "reconciled": null,
   "reconcile_note": "not reconciled (usage/events fetched; X-Request-Id join not automated yet)",
@@ -54,48 +53,6 @@
     {
       "type": "product.no_customers",
       "detail": "buyer_finder will use low-confidence ICP"
-    },
-    {
-      "type": "buyer.icp_proposed",
-      "industries": [
-        "Financial Services",
-        "Healthcare",
-        "Pharmaceutical Manufacturing",
-        "Insurance",
-        "Government & Defense"
-      ],
-      "countries": [
-        "United States",
-        "United Kingdom",
-        "Canada",
-        "Germany",
-        "France"
-      ],
-      "employee_count_ranges": [
-        "501-1000",
-        "1001-5000"
-      ],
-      "low_confidence_icp": true,
-      "customer_profiles": 0,
-      "source": "seller_product"
-    },
-    {
-      "type": "icp.auto_approved",
-      "edited_by_user": false,
-      "industries": [
-        "Financial Services",
-        "Healthcare",
-        "Pharmaceutical Manufacturing",
-        "Insurance",
-        "Government & Defense"
-      ],
-      "countries": [
-        "United States",
-        "United Kingdom",
-        "Canada",
-        "Germany",
-        "France"
-      ]
     },
     {
       "type": "buyers.import_started",
@@ -144,7 +101,8 @@
       "company_id": "60587007"
     },
     {
-      "type": "approval.empty_queue"
+      "type": "plan.no_contacts",
+      "detail": "No contacts found; add a contact to write emails"
     }
   ]
 }
