@@ -214,8 +214,48 @@ export type MailAccount = {
   drafts_folder?: string | null;
   is_default: boolean;
   has_password: boolean;
+  agent_enabled?: boolean;
   sent_24h: number;
   cap: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type MeetingSlot = {
+  label: string;
+  start_iso?: string | null;
+};
+
+export type MeetingProposal = {
+  id: string;
+  slots: MeetingSlot[];
+  booking_link?: string | null;
+  status: string;
+  notes?: string | null;
+  calendar_event_id?: string | null;
+  calendar_html_link?: string | null;
+};
+
+export type CalendarStatus = {
+  configured: boolean;
+  connected: boolean;
+  email?: string | null;
+  status: string;
+  updated_at?: string | null;
+  scope: string;
+  redirect_uri: string;
+};
+
+export type ReplyDraft = {
+  id: string;
+  lead_id: string;
+  campaign_id: string;
+  classification: string;
+  subject: string;
+  body: string;
+  status: string;
+  in_reply_to?: string | null;
+  meeting?: MeetingProposal | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -337,6 +377,10 @@ export type LeadRow = {
   followup_2_editable?: boolean;
   claims?: DraftClaim[];
   has_internal_refs?: boolean;
+  reply_classification?: string | null;
+  reply_draft_status?: string | null;
+  reply_draft_id?: string | null;
+  finance_skipped_count?: number;
 };
 
 export type PipelineAgent = {
@@ -511,6 +555,43 @@ export function deleteMailAccount(id: string) {
   return api<void>(`/mail-accounts/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+}
+
+export function disconnectMailAgent(id: string) {
+  return api<MailAccount>(`/mail-accounts/${encodeURIComponent(id)}/disconnect`, {
+    method: "POST",
+  });
+}
+
+export function getCalendarStatus() {
+  return api<CalendarStatus>("/calendar/status");
+}
+
+export function startCalendarOAuth() {
+  return api<{ auth_url: string }>("/calendar/oauth/start");
+}
+
+export function disconnectCalendar() {
+  return api<CalendarStatus>("/calendar/disconnect", { method: "POST" });
+}
+
+export function getLeadReplyDraft(leadId: string) {
+  return api<ReplyDraft | null>(`/leads/${encodeURIComponent(leadId)}/reply-draft`);
+}
+
+export function decideReplyDraft(
+  draftId: string,
+  body: {
+    action: "approve" | "reject";
+    subject?: string;
+    body?: string;
+    selected_slot_label?: string;
+  },
+) {
+  return api<{ draft_id: string; status: string; send?: unknown }>(
+    `/reply-drafts/${encodeURIComponent(draftId)}/decide`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
 }
 
 export function putSendingPaused(sending_paused: boolean) {

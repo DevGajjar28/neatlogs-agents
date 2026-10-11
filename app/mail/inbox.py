@@ -16,6 +16,7 @@ from app.infra.events import record_event
 from app.infra.redact import mask_email, redact_text
 from app.mail.accounts import get_credentials, list_accounts, set_account_status
 from app.mail.classify import classify_reply, redact_snippet
+from app.mail.finance_gate import finance_blocked
 from app.mail.policy import get_setting, set_setting
 from app.mail.verify import sanitize_error
 
@@ -102,11 +103,16 @@ def _apply_classification(
     snippet: str,
     message_id: str | None,
     account_id: str,
-) -> None:
+    db_path: str | None = None,
+) -> int | None:
+    """Persist reply + lead status. Events are emitted after commit to avoid DB locks."""
     now = datetime.now(timezone.utc).isoformat()
     kind = "opt_out" if classification == "opt_out" else "reply"
     if classification == "bounce":
         kind = "reply"
+    pending_events: list[tuple] = []
+    pause_account = False
+
     conn.execute(
         """
         INSERT INTO replies (
@@ -116,7 +122,13 @@ def _apply_classification(
         """,
         (lead_id, kind, now, message_id, from_masked, classification, snippet),
     )
-    if classification in {"interested", "not_interested", "question", "other"}:
+    if classification in {
+        "interested",
+        "not_interested",
+        "question",
+        "meeting_request",
+        "other",
+    }:
         conn.execute(
             "UPDATE scheduled_jobs SET status = 'cancelled' WHERE lead_id = ? AND status = 'pending'",
             (lead_id,),
@@ -125,36 +137,34 @@ def _apply_classification(
             "UPDATE leads SET status = 'replied', updated_at = ? WHERE id = ?",
             (now, lead_id),
         )
-        record_event(
-            campaign_id,
-            "mail.reply_detected",
-            "inbox",
-            f"Reply detected ({classification}).",
-            lead_id=lead_id,
-            data={"classification": classification, "from_masked": from_masked},
+        pending_events.append(
+            (
+                campaign_id,
+                "mail.reply_detected",
+                "inbox",
+                f"Reply detected ({classification}).",
+                lead_id,
+                {"classification": classification, "from_masked": from_masked},
+            )
         )
     elif classification == "opt_out":
         conn.execute(
             "UPDATE scheduled_jobs SET status = 'cancelled' WHERE lead_id = ? AND status = 'pending'",
             (lead_id,),
         )
-        # suppress — need actual address from emails if possible
-        row = conn.execute(
-            "SELECT actual_recipient FROM emails WHERE lead_id = ? ORDER BY step LIMIT 1",
-            (lead_id,),
-        ).fetchone()
-        # We only have masked in replies; suppress domain-less via lead id key if needed
         conn.execute(
             "UPDATE leads SET status = 'opted_out', updated_at = ? WHERE id = ?",
             (now, lead_id),
         )
-        record_event(
-            campaign_id,
-            "mail.opt_out",
-            "inbox",
-            "Recipient opted out; follow-ups cancelled.",
-            lead_id=lead_id,
-            data={"from_masked": from_masked},
+        pending_events.append(
+            (
+                campaign_id,
+                "mail.opt_out",
+                "inbox",
+                "Recipient opted out; follow-ups cancelled.",
+                lead_id,
+                {"from_masked": from_masked},
+            )
         )
     elif classification == "bounce":
         if email_id:
@@ -166,15 +176,16 @@ def _apply_classification(
             "UPDATE leads SET status = 'bounced', updated_at = ? WHERE id = ?",
             (now, lead_id),
         )
-        record_event(
-            campaign_id,
-            "mail.bounce",
-            "inbox",
-            "Bounce detected.",
-            lead_id=lead_id,
-            data={"from_masked": from_masked},
+        pending_events.append(
+            (
+                campaign_id,
+                "mail.bounce",
+                "inbox",
+                "Bounce detected.",
+                lead_id,
+                {"from_masked": from_masked},
+            )
         )
-        # auto-pause on 3 bounces / 24h
         since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         n = conn.execute(
             """
@@ -184,28 +195,92 @@ def _apply_classification(
             (account_id, since),
         ).fetchone()["n"]
         if n >= 3:
+            pause_account = True
+            pending_events.append(
+                (
+                    campaign_id,
+                    "mail.account_paused",
+                    "inbox",
+                    "Mail account auto-paused after repeated bounces.",
+                    None,
+                    {"account_id": account_id},
+                )
+            )
+    elif classification == "out_of_office":
+        pending_events.append(
+            (
+                campaign_id,
+                "mail.out_of_office",
+                "inbox",
+                "Out-of-office reply ignored.",
+                lead_id,
+                {"from_masked": from_masked},
+            )
+        )
+    conn.commit()
+    row = conn.execute("SELECT last_insert_rowid() AS id").fetchone()
+    reply_id = int(row["id"]) if row else None
+
+    # Emit events only after commit — never nest another DB write while conn is dirty.
+    for camp, etype, agent, msg, lid, data in pending_events:
+        try:
+            record_event(
+                camp,
+                etype,
+                agent,
+                msg,
+                lead_id=lid,
+                data=data,
+                db_path=db_path,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    if pause_account:
+        try:
             set_account_status(
                 account_id,
                 "disabled",
                 last_error="Auto-paused after 3 bounces in 24h.",
+                db_path=db_path,
             )
-            record_event(
-                campaign_id,
-                "mail.account_paused",
-                "inbox",
-                "Mail account auto-paused after repeated bounces.",
-                data={"account_id": account_id},
-            )
-    elif classification == "out_of_office":
-        record_event(
-            campaign_id,
-            "mail.out_of_office",
-            "inbox",
-            "Out-of-office reply ignored.",
-            lead_id=lead_id,
-            data={"from_masked": from_masked},
-        )
-    conn.commit()
+        except Exception:  # noqa: BLE001
+            pass
+    return reply_id
+
+def _maybe_draft_reply(
+    *,
+    lead_id: str,
+    campaign_id: str,
+    reply_id: int | None,
+    classification: str,
+    snippet: str,
+    from_masked: str,
+    message_id: str | None,
+    our_subject: str | None,
+    db_path: str | None,
+) -> None:
+    """Run tool-less decision agent for classes that warrant a human-approved reply."""
+    if classification not in {"interested", "question", "meeting_request"}:
+        return
+    from app.agents.reply_decision import ReplyTicket, run_decision_for_ticket
+
+    ticket = ReplyTicket(
+        lead_id=lead_id,
+        campaign_id=campaign_id,
+        reply_id=reply_id,
+        classification=classification,
+        snippet=snippet,
+        from_masked=from_masked,
+        our_subject=our_subject,
+        in_reply_to=message_id,
+        contact_name=None,
+        company_name=None,
+    )
+    try:
+        run_decision_for_ticket(ticket, use_llm=True, db_path=db_path)
+    except Exception:  # noqa: BLE001
+        # Never fail the poller because drafting failed; lead is already replied.
+        run_decision_for_ticket(ticket, use_llm=False, db_path=db_path)
 
 
 def poll_account(account_id: str, *, db_path: str | None = None, imap_factory=None) -> int:
@@ -217,7 +292,12 @@ def poll_account(account_id: str, *, db_path: str | None = None, imap_factory=No
     applied = 0
     try:
         account = conn.execute(
-            "SELECT * FROM mail_accounts WHERE id = ? AND status = 'ok'",
+            """
+            SELECT * FROM mail_accounts
+            WHERE id = ? AND status = 'ok'
+              AND COALESCE(agent_enabled, 1) = 1
+              AND password_enc IS NOT NULL
+            """,
             (account_id,),
         ).fetchone()
         if not account:
@@ -274,6 +354,29 @@ def poll_account(account_id: str, *, db_path: str | None = None, imap_factory=No
                         uid = num.decode() if isinstance(num, bytes) else str(num)
                         if uid in processed:
                             continue
+                        # Header-only first — finance/OTP never gets a body fetch
+                        typ, hdr_fetched = imap.fetch(num, "(BODY.PEEK[HEADER]<0.8192>)")
+                        if typ != "OK" or not hdr_fetched or not hdr_fetched[0]:
+                            continue
+                        hdr_bytes = hdr_fetched[0][1]
+                        if not isinstance(hdr_bytes, (bytes, bytearray)):
+                            continue
+                        hdr_msg = email.message_from_bytes(bytes(hdr_bytes[:8192]))
+                        from_addr = _decode_mime(hdr_msg.get("From"))
+                        subject = _decode_mime(hdr_msg.get("Subject"))
+                        blocked = finance_blocked(subject=subject, from_addr=from_addr)
+                        if blocked:
+                            record_event(
+                                row["campaign_id"],
+                                "policy.finance_skipped",
+                                "inbox",
+                                "Skipped finance/OTP message (headers only; body not opened).",
+                                lead_id=row["lead_id"],
+                                data={"reason": blocked},
+                                db_path=path,
+                            )
+                            processed.add(uid)
+                            continue
                         typ, fetched = imap.fetch(num, "(BODY.PEEK[]<0.65536>)")
                         if typ != "OK" or not fetched or not fetched[0]:
                             continue
@@ -281,10 +384,13 @@ def poll_account(account_id: str, *, db_path: str | None = None, imap_factory=No
                         if not isinstance(raw_bytes, (bytes, bytearray)):
                             continue
                         msg = email.message_from_bytes(bytes(raw_bytes[:65536]))
-                        from_addr = _decode_mime(msg.get("From"))
-                        subject = _decode_mime(msg.get("Subject"))
+                        from_addr = _decode_mime(msg.get("From")) or from_addr
+                        subject = _decode_mime(msg.get("Subject")) or subject
                         body = _extract_text(msg)
-                        headers = {k: msg.get(k) for k in ("Auto-Submitted", "X-Autoreply", "Precedence")}
+                        headers = {
+                            k: msg.get(k)
+                            for k in ("Auto-Submitted", "X-Autoreply", "Precedence")
+                        }
                         label = classify_reply(
                             subject=subject,
                             body=body,
@@ -295,7 +401,17 @@ def poll_account(account_id: str, *, db_path: str | None = None, imap_factory=No
                         from_masked = mask_email(
                             email.utils.parseaddr(from_addr)[1] or from_addr
                         )
-                        _apply_classification(
+                        our_subject = None
+                        try:
+                            er = conn.execute(
+                                "SELECT subject FROM emails WHERE id = ?",
+                                (row["id"],),
+                            ).fetchone()
+                            if er:
+                                our_subject = er["subject"]
+                        except Exception:  # noqa: BLE001
+                            our_subject = None
+                        reply_id = _apply_classification(
                             conn,
                             lead_id=row["lead_id"],
                             campaign_id=row["campaign_id"],
@@ -305,6 +421,18 @@ def poll_account(account_id: str, *, db_path: str | None = None, imap_factory=No
                             snippet=snippet,
                             message_id=msg.get("Message-ID"),
                             account_id=account_id,
+                            db_path=path,
+                        )
+                        _maybe_draft_reply(
+                            lead_id=row["lead_id"],
+                            campaign_id=row["campaign_id"],
+                            reply_id=reply_id,
+                            classification=label,
+                            snippet=snippet,
+                            from_masked=from_masked,
+                            message_id=msg.get("Message-ID"),
+                            our_subject=our_subject,
+                            db_path=path,
                         )
                         processed.add(uid)
                         applied += 1
@@ -342,6 +470,7 @@ def poll_account(account_id: str, *, db_path: str | None = None, imap_factory=No
                         snippet=redact_text(text)[:300],
                         message_id=msg.get("Message-ID"),
                         account_id=account_id,
+                        db_path=path,
                     )
                     processed.add(uid)
                     applied += 1
@@ -352,9 +481,15 @@ def poll_account(account_id: str, *, db_path: str | None = None, imap_factory=No
         conn.commit()
         return applied
     except Exception as exc:  # noqa: BLE001
-        # sanitize — do not store password
+        # sanitize — do not store password; ignore transient SQLite locks
+        err = str(exc).lower()
+        if "database is locked" in err or "locked" in err:
+            return applied
         msg = sanitize_error(exc, host="imap", port=993)
-        set_account_status(account_id, "error", last_error=msg, db_path=path)
+        try:
+            set_account_status(account_id, "error", last_error=msg, db_path=path)
+        except Exception:  # noqa: BLE001
+            pass
         return applied
     finally:
         conn.close()
@@ -364,6 +499,10 @@ def poll_all_accounts(*, db_path: str | None = None, imap_factory=None) -> int:
     total = 0
     for acc in list_accounts(db_path=db_path):
         if acc.get("status") != "ok":
+            continue
+        if int(acc.get("agent_enabled") if acc.get("agent_enabled") is not None else 1) != 1:
+            continue
+        if not acc.get("has_password"):
             continue
         total += poll_account(acc["id"], db_path=db_path, imap_factory=imap_factory)
     return total

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import campaigns, email_templates, mail, system
+from app.api.routes import calendar, campaigns, email_templates, mail, system
 from app.config import get_settings
 from app.infra.db import init_db
 from app.infra.email_templates import seed_default_template
@@ -28,7 +28,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(system.router, prefix="/api")
-app.include_router(campaigns.router, prefix="/api")
-app.include_router(mail.router, prefix="/api")
-app.include_router(email_templates.router, prefix="/api")
+PREFIX = "/api"
+app.include_router(system.router, prefix=PREFIX)
+app.include_router(campaigns.router, prefix=PREFIX)
+app.include_router(mail.router, prefix=PREFIX)
+app.include_router(email_templates.router, prefix=PREFIX)
+app.include_router(calendar.router, prefix=PREFIX)

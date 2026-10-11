@@ -29,6 +29,7 @@ import {
   ApiError,
   deleteMailAccount,
   disableMailAccount,
+  disconnectMailAgent,
   enableMailAccount,
   listMailAccounts,
   testSendMailAccount,
@@ -38,8 +39,13 @@ import {
 import { queryKeys } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 
-function statusTone(status: string): { tone?: "success" | "warning" | "danger" | "neutral"; label: string } {
-  switch (status) {
+function statusTone(
+  acc: MailAccount,
+): { tone?: "success" | "warning" | "danger" | "neutral"; label: string } {
+  if (!acc.has_password || acc.agent_enabled === false) {
+    return { tone: "neutral", label: "Disconnected" };
+  }
+  switch (acc.status) {
     case "ok":
       return { tone: "success", label: "Connected" };
     case "error":
@@ -110,6 +116,15 @@ export function MailAccountsSection({ liveAllowed }: { liveAllowed: boolean }) {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : "Delete failed"),
   });
 
+  const disconnectMut = useMutation({
+    mutationFn: (id: string) => disconnectMailAgent(id),
+    onSuccess: () => {
+      refresh();
+      toast.success("Inbox agent disconnected — re-enter an app password to reconnect");
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : "Disconnect failed"),
+  });
+
   return (
     <div className="rounded-[8px] border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -167,7 +182,7 @@ export function MailAccountsSection({ liveAllowed }: { liveAllowed: boolean }) {
           </TableHeader>
           <TableBody>
             {(q.data || []).map((acc) => {
-              const st = statusTone(acc.status);
+              const st = statusTone(acc);
               const pct = acc.cap > 0 ? (acc.sent_24h / acc.cap) * 100 : 0;
               return (
                 <TableRow key={acc.id}>
@@ -226,6 +241,22 @@ export function MailAccountsSection({ liveAllowed }: { liveAllowed: boolean }) {
                             Disable
                           </DropdownMenuItem>
                         )}
+                        {acc.has_password ? (
+                          <DropdownMenuItem
+                            className="text-[var(--status-danger)]"
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Disconnect inbox agent for ${acc.email}? This deletes the saved app password. History stays; reconnect needs a new app password.`,
+                                )
+                              ) {
+                                disconnectMut.mutate(acc.id);
+                              }
+                            }}
+                          >
+                            Disconnect agent
+                          </DropdownMenuItem>
+                        ) : null}
                         <DropdownMenuItem
                           className="text-[var(--status-danger)]"
                           onClick={() => {

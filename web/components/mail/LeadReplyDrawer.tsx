@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RelativeTime } from "@/components/common/RelativeTime";
 import { StatusBadge } from "@/components/common/StatusBadge";
@@ -21,6 +21,9 @@ import { WhyWeSaidThis } from "@/components/mail/WhyWeSaidThis";
 import {
   ApiError,
   decideEmail,
+  decideReplyDraft,
+  getCalendarStatus,
+  getLeadReplyDraft,
   patchLeadSequence,
   sendApproved,
   type LeadRow,
@@ -54,6 +57,9 @@ export function LeadReplyDrawer({ open, onOpenChange, lead, reply, campaignId }:
   const [s3Subject, setS3Subject] = useState("");
   const [s3Body, setS3Body] = useState("");
   const [confirmGuessed, setConfirmGuessed] = useState(false);
+  const [replySubject, setReplySubject] = useState("");
+  const [replyBody, setReplyBody] = useState("");
+  const [selectedSlot, setSelectedSlot] = useState<string>("");
 
   useEffect(() => {
     if (!lead) return;
@@ -66,6 +72,27 @@ export function LeadReplyDrawer({ open, onOpenChange, lead, reply, campaignId }:
     setConfirmGuessed(false);
   }, [lead]);
 
+  const draftQ = useQuery({
+    queryKey: ["reply-draft", lead?.lead_id],
+    queryFn: () => getLeadReplyDraft(lead!.lead_id),
+    enabled: open && Boolean(lead?.lead_id) && Boolean(lead?.reply_draft_id || lead?.status === "replied"),
+  });
+
+  const calendarQ = useQuery({
+    queryKey: queryKeys.calendarStatus,
+    queryFn: getCalendarStatus,
+    enabled: open,
+  });
+
+  useEffect(() => {
+    const d = draftQ.data;
+    if (!d) return;
+    setReplySubject(d.subject || "");
+    setReplyBody(d.body || "");
+    const first = d.meeting?.slots?.[0]?.label || "";
+    setSelectedSlot(first);
+  }, [draftQ.data]);
+
   const canApprove =
     Boolean(campaignId && lead?.contact_id && lead.email_1_subject) &&
     APPROVABLE.has((lead?.status || "").toLowerCase()) &&
@@ -73,6 +100,7 @@ export function LeadReplyDrawer({ open, onOpenChange, lead, reply, campaignId }:
 
   const hasRefs = EV_RE.test(`${s1Subject}\n${s1Body}`) || Boolean(lead?.has_internal_refs);
   const guessed = (lead?.email_confidence || "").toLowerCase() === "guessed";
+  const pendingReplyDraft = draftQ.data?.status === "pending" ? draftQ.data : null;
 
   const saveMut = useMutation({
     mutationFn: () =>
@@ -135,6 +163,46 @@ export function LeadReplyDrawer({ open, onOpenChange, lead, reply, campaignId }:
     },
   });
 
+  const replyDecideMut = useMutation({
+    mutationFn: async (action: "approve" | "reject") => {
+      if (!pendingReplyDraft) {
+        throw new ApiError("No pending reply draft", 422, null);
+      }
+      return decideReplyDraft(pendingReplyDraft.id, {
+        action,
+        subject: action === "approve" ? replySubject : undefined,
+        body: action === "approve" ? replyBody : undefined,
+        selected_slot_label:
+          action === "approve" && selectedSlot ? selectedSlot : undefined,
+      });
+    },
+    onSuccess: (data, action) => {
+      if (action === "approve") {
+        const link =
+          data && typeof data === "object" && "calendar" in data
+            ? (data as { calendar?: { html_link?: string } }).calendar?.html_link
+            : undefined;
+        toast.success(
+          link ? "Reply sent — meeting added to your test calendar" : "Reply sent",
+        );
+      } else {
+        toast.success("Reply draft rejected");
+      }
+      void qc.invalidateQueries({ queryKey: ["reply-draft", lead?.lead_id] });
+      if (campaignId) {
+        void qc.invalidateQueries({ queryKey: queryKeys.campaignLeads(campaignId) });
+        void qc.invalidateQueries({ queryKey: queryKeys.campaign(campaignId) });
+        void qc.invalidateQueries({ queryKey: queryKeys.campaignEvents(campaignId) });
+      }
+      onOpenChange(false);
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : "Reply decision failed");
+    },
+  });
+
+  const defaultTab = pendingReplyDraft || reply ? "reply" : "sequence";
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -150,6 +218,11 @@ export function LeadReplyDrawer({ open, onOpenChange, lead, reply, campaignId }:
             {lead?.email_masked || lead?.company_domain}
             {lead?.company_name ? (
               <span className="ml-1">· {lead.company_name}</span>
+            ) : null}
+            {lead?.status === "replied" ? (
+              <span className="ml-2 inline-flex items-center gap-1">
+                · <StatusBadge status="replied" />
+              </span>
             ) : null}
             {lead?.sent_at ? (
               <span className="ml-2">
@@ -200,7 +273,7 @@ export function LeadReplyDrawer({ open, onOpenChange, lead, reply, campaignId }:
               </div>
             </div>
           ) : null}
-          <Tabs defaultValue="sequence">
+          <Tabs key={defaultTab} defaultValue={defaultTab}>
             <TabsList className="mb-3">
               <TabsTrigger value="sequence">Sequence</TabsTrigger>
               <TabsTrigger value="reply">Reply</TabsTrigger>
@@ -240,22 +313,16 @@ export function LeadReplyDrawer({ open, onOpenChange, lead, reply, campaignId }:
                 {saveMut.isPending ? "Saving…" : "Save sequence"}
               </Button>
             </TabsContent>
-            <TabsContent value="reply">
-              {!reply ? (
+            <TabsContent value="reply" className="space-y-4">
+              {!reply && !pendingReplyDraft ? (
                 <p className="text-[13px] text-[var(--text-muted)]">No reply detected yet.</p>
-              ) : (
+              ) : null}
+              {reply ? (
                 <div className="space-y-2 rounded-[8px] border border-[var(--border)] p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge
+                      status={reply.classification || "other"}
                       label={(reply.classification || "other").replaceAll("_", " ")}
-                      tone={
-                        reply.classification === "opt_out" ||
-                        reply.classification === "not_interested"
-                          ? "danger"
-                          : reply.classification === "interested"
-                            ? "success"
-                            : "neutral"
-                      }
                     />
                     <RelativeTime value={reply.received_at} />
                   </div>
@@ -276,7 +343,85 @@ export function LeadReplyDrawer({ open, onOpenChange, lead, reply, campaignId }:
                     </a>
                   ) : null}
                 </div>
-              )}
+              ) : null}
+              {pendingReplyDraft ? (
+                <div className="space-y-3 rounded-[8px] border border-[var(--status-warning)] bg-[var(--status-warning-soft)] p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status="reply_draft" />
+                    <StatusBadge
+                      status={pendingReplyDraft.classification}
+                      label={pendingReplyDraft.classification.replaceAll("_", " ")}
+                    />
+                  </div>
+                  <p className="text-[12px] text-[var(--text-muted)]">
+                    Decision agent draft — approve to send (threaded).
+                  </p>
+                  {pendingReplyDraft.meeting?.slots?.length ? (
+                    <div className="space-y-2">
+                      <p className="text-[12px] font-medium">Proposed meeting slots</p>
+                      <ul className="space-y-1">
+                        {pendingReplyDraft.meeting.slots.map((slot) => (
+                          <li key={slot.label}>
+                            <label className="flex items-center gap-2 text-[12px]">
+                              <input
+                                type="radio"
+                                name="meeting-slot"
+                                checked={selectedSlot === slot.label}
+                                onChange={() => setSelectedSlot(slot.label)}
+                              />
+                              {slot.label}
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                      {calendarQ.data?.connected ? (
+                        <p className="text-[11px] text-[var(--status-success)]">
+                          On approve, this slot is added to{" "}
+                          {calendarQ.data.email || "your connected test calendar"}{" "}
+                          (calendar.events OAuth — not the Gmail app password).
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-[var(--text-subtle)]">
+                          Connect a test Google Calendar in Settings to auto-create the
+                          event on approve.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                  <Input
+                    value={replySubject}
+                    onChange={(e) => setReplySubject(e.target.value)}
+                    placeholder="Reply subject"
+                    className="text-[13px]"
+                  />
+                  <Textarea
+                    value={replyBody}
+                    onChange={(e) => setReplyBody(e.target.value)}
+                    placeholder="Reply body"
+                    rows={8}
+                    className="min-h-[140px] text-[13px]"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      disabled={replyDecideMut.isPending}
+                      onClick={() => replyDecideMut.mutate("approve")}
+                    >
+                      {replyDecideMut.isPending && replyDecideMut.variables === "approve"
+                        ? "Sending…"
+                        : "Approve & send reply"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={replyDecideMut.isPending}
+                      onClick={() => replyDecideMut.mutate("reject")}
+                    >
+                      Reject draft
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </TabsContent>
           </Tabs>
         </div>

@@ -316,7 +316,8 @@ export function MailAccountDrawer({ open, onOpenChange, account, liveAllowed }: 
               placeholder="you@example.com"
             />
             <p className="text-[12px] text-[var(--text-subtle)]">
-              Comma-separated. Gmail test mode only sends here.
+              Comma-separated allowlist for Gmail test mode. Contact emails on this
+              list receive mail; anything else is rewritten to the first address.
             </p>
           </Field>
 
@@ -355,9 +356,6 @@ export function MailAccountDrawer({ open, onOpenChange, account, liveAllowed }: 
               <Field label="Signature">
                 <Textarea value={signature} onChange={(e) => setSignature(e.target.value)} rows={2} className="rounded-[6px]" />
               </Field>
-              <Field label="Postal address (required for live)">
-                <Textarea value={postal} onChange={(e) => setPostal(e.target.value)} rows={2} className="rounded-[6px]" />
-              </Field>
             </div>
           ) : null}
 
@@ -365,10 +363,25 @@ export function MailAccountDrawer({ open, onOpenChange, account, liveAllowed }: 
             <p className="text-[13px] font-medium">Live sending</p>
             {!liveAllowed ? (
               <p className="text-[12px] text-[var(--text-muted)]">
-                Disabled while DEMO_MODE is on or ALLOW_LIVE_SENDS is false.
+                Disabled while DEMO_MODE is on or ALLOW_LIVE_SENDS is false. Set{" "}
+                <span className="font-mono text-[11px]">DEMO_MODE=false</span> and{" "}
+                <span className="font-mono text-[11px]">ALLOW_LIVE_SENDS=true</span> in{" "}
+                <span className="font-mono text-[11px]">.env</span>, then restart the API.
               </p>
             ) : (
               <>
+                <Field label="Postal / physical address (required for live)">
+                  <Textarea
+                    value={postal}
+                    onChange={(e) => setPostal(e.target.value)}
+                    rows={2}
+                    className="rounded-[6px]"
+                    placeholder="Company name, street, city, country"
+                  />
+                  <p className="text-[11px] text-[var(--text-subtle)]">
+                    Used in live email footers (CAN-SPAM). Required before Live can be enabled.
+                  </p>
+                </Field>
                 <label className="flex items-start gap-2 text-[12px]">
                   <Checkbox checked={ackLawful} onCheckedChange={(c) => setAckLawful(Boolean(c))} />
                   Recipients are business contacts I may lawfully email
@@ -385,6 +398,15 @@ export function MailAccountDrawer({ open, onOpenChange, account, liveAllowed }: 
                   />
                   Enable live for this account
                 </label>
+                {!canLive ? (
+                  <p className="text-[11px] text-[var(--status-warning)]">
+                    {!postal.trim()
+                      ? "Add a postal address above, then check both boxes — then Live unlocks."
+                      : !ackLawful || !ackPolicy
+                        ? "Check both acknowledgement boxes above to unlock Live."
+                        : "Complete the steps above to enable Live."}
+                  </p>
+                ) : null}
               </>
             )}
           </div>

@@ -9,6 +9,7 @@ export const queryKeys = {
   pendingApprovals: (id: string) => ["campaigns", id, "pending-approvals"] as const,
   approvalsInbox: ["approvals", "inbox"] as const,
   mailAccounts: ["mail-accounts"] as const,
+  calendarStatus: ["calendar", "status"] as const,
   mailPresets: ["mail-accounts", "presets"] as const,
   mailPolicies: ["settings", "policies"] as const,
   policyEvents: (rule: string) => ["settings", "policies", rule, "events"] as const,

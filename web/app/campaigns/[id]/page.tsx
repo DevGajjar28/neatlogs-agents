@@ -180,6 +180,14 @@ export default function CampaignRunPage() {
               }
             />
           </div>
+          {sendMode === "gmail_test" ? (
+            <p className="rounded-[8px] border border-[var(--status-warning)] bg-[var(--status-warning-soft)] px-3 py-2 text-[12px] text-[var(--text)]">
+              Gmail test mode: mail only goes to your test-recipient allowlist. Contact
+              addresses not on that list are rewritten to your first allowlisted inbox
+              (often your own Gmail). Use <span className="font-medium">Gmail live</span>{" "}
+              to send to real prospect addresses.
+            </p>
+          ) : null}
           {q.data.run_facts?.template_name ? (
             <p className="text-[12px] text-[var(--text-muted)]">
               Email style:{" "}
@@ -256,7 +264,11 @@ export default function CampaignRunPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <StatusBadge status={lead.status} />
+                            {lead.reply_draft_status === "pending" ? (
+                              <StatusBadge status="reply_draft" />
+                            ) : (
+                              <StatusBadge status={lead.status} />
+                            )}
                           </TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             {noContact && lead.company_id ? (

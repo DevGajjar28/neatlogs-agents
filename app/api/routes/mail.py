@@ -15,12 +15,17 @@ from app.api.schemas import (
     MailPoliciesOut,
     MailPoliciesPatchIn,
     MailPresetOut,
+    MeetingProposalOut,
+    MeetingSlotOut,
     OutboxRow,
     PolicyEventOut,
+    ReplyDraftDecideIn,
+    ReplyDraftOut,
     SendingPausedIn,
     SendingPausedOut,
     VerifyOut,
 )
+from app.agents import reply_decision as reply_decision_mod
 from app.config import get_settings
 from app.infra.audit import write_audit
 from app.infra.db import connect, init_db
@@ -209,6 +214,9 @@ POLICY_RULES: list[dict[str, Any]] = [
 
 
 def _public_account(row: dict[str, Any]) -> MailAccountOut:
+    agent_on = row.get("agent_enabled")
+    if agent_on is None:
+        agent_on = 1
     return MailAccountOut(
         id=row["id"],
         label=row.get("label") or "",
@@ -234,10 +242,48 @@ def _public_account(row: dict[str, Any]) -> MailAccountOut:
         drafts_folder=row.get("drafts_folder"),
         is_default=bool(row.get("is_default")),
         has_password=bool(row.get("has_password")),
+        agent_enabled=bool(int(agent_on)),
         sent_24h=int(row.get("sent_24h") or 0),
         cap=int(row.get("cap") or row.get("daily_cap") or 25),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
+    )
+
+
+def _draft_out(d: dict[str, Any]) -> ReplyDraftOut:
+    meeting = None
+    raw_m = d.get("meeting")
+    if isinstance(raw_m, dict) and raw_m.get("id"):
+        slots = []
+        for s in raw_m.get("slots") or []:
+            if isinstance(s, dict):
+                slots.append(
+                    MeetingSlotOut(
+                        label=str(s.get("label") or ""),
+                        start_iso=s.get("start_iso"),
+                    )
+                )
+        meeting = MeetingProposalOut(
+            id=str(raw_m["id"]),
+            slots=slots,
+            booking_link=raw_m.get("booking_link"),
+            status=str(raw_m.get("status") or "proposed"),
+            notes=raw_m.get("notes"),
+            calendar_event_id=raw_m.get("calendar_event_id"),
+            calendar_html_link=raw_m.get("calendar_html_link"),
+        )
+    return ReplyDraftOut(
+        id=d["id"],
+        lead_id=d["lead_id"],
+        campaign_id=d["campaign_id"],
+        classification=d.get("classification") or "other",
+        subject=d.get("subject") or "",
+        body=d.get("body") or "",
+        status=d.get("status") or "pending",
+        in_reply_to=d.get("in_reply_to"),
+        meeting=meeting,
+        created_at=d.get("created_at"),
+        updated_at=d.get("updated_at"),
     )
 
 
@@ -352,6 +398,92 @@ def disable_mail_account(account_id: str) -> MailAccountOut:
     mail_accounts.set_account_status(account_id, "disabled", last_error="Disabled by user")
     listed = next(a for a in mail_accounts.list_accounts() if a["id"] == account_id)
     return _public_account(listed)
+
+
+@router.post("/mail-accounts/{account_id}/disconnect", response_model=MailAccountOut)
+def disconnect_mail_agent(account_id: str) -> MailAccountOut:
+    """Disable inbox agent, wipe app password, cancel pending reply drafts."""
+    if not mail_accounts.get_account(account_id):
+        raise HTTPException(404, detail="Mail account not found")
+    try:
+        mail_accounts.disconnect_agent(account_id)
+    except KeyError as exc:
+        raise HTTPException(404, detail="Mail account not found") from exc
+    write_audit(
+        actor="api",
+        action="mail_agent_disconnect",
+        target=account_id,
+        details={"event": "mail.agent_disconnected"},
+    )
+    listed = next(a for a in mail_accounts.list_accounts() if a["id"] == account_id)
+    return _public_account(listed)
+
+
+@router.get("/leads/{lead_id}/reply-draft", response_model=ReplyDraftOut | None)
+def get_lead_reply_draft(lead_id: str) -> ReplyDraftOut | None:
+    draft = reply_decision_mod.get_pending_draft_for_lead(lead_id)
+    if not draft:
+        return None
+    return _draft_out(draft)
+
+
+@router.post("/reply-drafts/{draft_id}/decide")
+def decide_reply_draft(draft_id: str, body: ReplyDraftDecideIn) -> dict[str, Any]:
+    if body.action == "reject":
+        try:
+            return reply_decision_mod.reject_reply_draft(draft_id)
+        except KeyError as exc:
+            raise HTTPException(404, detail="Reply draft not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM reply_drafts WHERE id = ?", (draft_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, detail="Reply draft not found")
+        lead = conn.execute(
+            "SELECT * FROM leads WHERE id = ?", (row["lead_id"],)
+        ).fetchone()
+        if not lead:
+            raise HTTPException(404, detail="Lead not found")
+        contact_id = lead["contact_id"]
+        campaign_id = row["campaign_id"]
+    finally:
+        conn.close()
+
+    from app.api import state_reader
+
+    contacts = {
+        c["id"]: c
+        for c in state_reader.contacts(campaign_id)
+        if isinstance(c, dict) and c.get("id")
+    }
+    contact = contacts.get(contact_id or "") or {}
+    to_email = str(contact.get("email") or "").strip()
+    if not to_email:
+        raise HTTPException(422, detail="Lead has no contact email to reply to")
+
+    try:
+        return reply_decision_mod.approve_and_send_reply_draft(
+            draft_id,
+            subject=body.subject,
+            body=body.body,
+            selected_slot_label=body.selected_slot_label,
+            to_email=to_email,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, detail="Reply draft not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    except PolicyDenied as exc:
+        raise HTTPException(409, detail=exc.reason) from exc
+    except MailerError as exc:
+        raise HTTPException(502, detail=str(exc)) from exc
 
 
 @router.post("/mail-accounts/{account_id}/enable", response_model=MailAccountOut)

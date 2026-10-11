@@ -217,9 +217,9 @@ export function NewCampaignDrawer() {
       case "gmail_drafts":
         return "Saves drafts in Gmail Drafts. Nothing is sent to prospects.";
       case "gmail_test":
-        return "Sends only to this account's test-recipient allowlist (rewritten).";
+        return "Safe mode: delivers only to addresses on the mail account's test allowlist. If the contact email is on that list, it goes there; otherwise it is rewritten to the first allowlisted inbox (usually your own). Real prospects need Gmail live.";
       case "gmail_live":
-        return "Sends to real prospect addresses. Requires live confirmation.";
+        return "Sends to the contact's real address. Enable Live on the mail account, then type the account email to confirm.";
       default:
         return "";
     }

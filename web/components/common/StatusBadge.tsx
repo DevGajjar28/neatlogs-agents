@@ -36,6 +36,14 @@ const STATUS_MAP: Record<string, { tone: StatusTone; label: string }> = {
   cancelled: { tone: "neutral", label: "Cancelled" },
   paused: { tone: "neutral", label: "Paused" },
   no_contact: { tone: "warning", label: "Not found" },
+  replied: { tone: "success", label: "Replied" },
+  opted_out: { tone: "danger", label: "Opted out" },
+  bounced: { tone: "danger", label: "Bounced" },
+  reply_draft: { tone: "warning", label: "Reply draft waiting" },
+  meeting_request: { tone: "info", label: "Meeting request" },
+  interested: { tone: "success", label: "Interested" },
+  not_interested: { tone: "neutral", label: "Not interested" },
+  question: { tone: "info", label: "Question" },
 };
 
 type StatusBadgeProps = {

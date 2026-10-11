@@ -42,6 +42,13 @@ class Settings(BaseSettings):
 
     db_path: str = "signalsdr.db"
 
+    # Separate Google Calendar OAuth (test account). Never the Gmail app password.
+    google_calendar_client_id: str = ""
+    google_calendar_client_secret: str = ""
+    google_calendar_redirect_uri: str = "http://127.0.0.1:8000/api/calendar/oauth/callback"
+    google_calendar_notify_attendees: bool = False
+    ui_base_url: str = "http://localhost:3000"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

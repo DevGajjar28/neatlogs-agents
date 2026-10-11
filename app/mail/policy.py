@@ -46,6 +46,8 @@ class PolicyContext:
     seller_domain: str = ""
     live_confirm_ok: bool = False
     intended_email: str | None = None  # before gmail_test rewrite
+    # Human-approved threaded reply (not a sequence follow-up).
+    human_reply: bool = False
     db_path: str | None = None
 
 
@@ -196,18 +198,28 @@ def _check_all_conn(conn, ctx: PolicyContext, settings) -> PolicyResult:
     if ctx.send_mode == "gmail_live" and local in ROLE_LIVE_BLOCK:
         return _fail("policy.role_address", local)
 
-    # Resolve actual recipient for gmail_test
+    # Resolve actual recipient for gmail_test:
+    # - If the intended To is on the allowlist → send there (e.g. your second inbox).
+    # - Otherwise rewrite to the first allowlisted address (never a random prospect).
     actual = to_email
     if ctx.send_mode == "gmail_test":
-        tests = []
+        tests: list[str] = []
         if account:
             try:
-                tests = json.loads(account.get("test_recipients_json") or "[]")
+                tests = [
+                    str(x).strip()
+                    for x in json.loads(account.get("test_recipients_json") or "[]")
+                    if str(x).strip() and "@" in str(x)
+                ]
             except Exception:  # noqa: BLE001
                 tests = []
         if not tests:
             return _fail("policy.test_recipient_missing")
-        actual = str(tests[0]).strip()
+        allow = {t.lower() for t in tests}
+        if to_email.lower() in allow:
+            actual = to_email.strip()
+        else:
+            actual = tests[0]
         if not actual or "@" not in actual:
             return _fail("policy.test_recipient_missing")
 
@@ -299,7 +311,9 @@ def _check_all_conn(conn, ctx: PolicyContext, settings) -> PolicyResult:
         if st in {"sent", "drafted"} or ds in {"sent", "drafted", "unknown"}:
             return _fail("policy.duplicate")
 
-    # 14. Follow-ups: lead not closed
+    # 14. Follow-ups: lead not closed (sequence steps only).
+    # Human-approved threaded replies are allowed after a normal reply; still
+    # block opt-out / bounce so we never continue contact after those.
     if ctx.step >= 2:
         reply = conn.execute(
             """
@@ -310,7 +324,17 @@ def _check_all_conn(conn, ctx: PolicyContext, settings) -> PolicyResult:
             (ctx.lead_id,),
         ).fetchone()
         if reply:
-            return _fail("policy.lead_closed", str(reply["kind"]))
+            kind = str(reply["kind"] or "")
+            classification = str(reply["classification"] or "")
+            closed = kind in {"opt_out", "bounce"} or classification in {
+                "opt_out",
+                "not_interested",
+            }
+            if ctx.human_reply:
+                if closed:
+                    return _fail("policy.lead_closed", classification or kind)
+            else:
+                return _fail("policy.lead_closed", kind)
 
     # 15. Content — block any ev_ id in any wrapper (docs/13 + docs/12)
     from app.agents.evidence_refs import find_refs

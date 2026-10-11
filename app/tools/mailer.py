@@ -76,6 +76,8 @@ def send(
     smtp_send: Any | None = None,
     approved: bool = True,
     verifier_passed: bool = True,
+    thread_in_reply_to: str | None = None,
+    keep_subject: bool = False,
 ) -> dict[str, Any]:
     """Run all policy checks, then deliver. Only public send entrypoint."""
     settings = get_settings()
@@ -105,6 +107,7 @@ def send(
             verifier_passed=verifier_passed,
             seller_domain=seller_domain,
             live_confirm_ok=live_confirm_ok,
+            human_reply=bool(thread_in_reply_to),
             db_path=path,
         )
         result = check_all(ctx)
@@ -158,9 +161,9 @@ def send(
             envelope_to = f"{lead_id}@sandbox.local"
 
         # Threading
-        in_reply_to = None
+        in_reply_to = thread_in_reply_to
         step1_subject = None
-        if step >= 2:
+        if in_reply_to is None and step >= 2:
             prev = conn.execute(
                 """
                 SELECT message_id, subject FROM emails
@@ -171,6 +174,17 @@ def send(
             ).fetchone()
             if prev:
                 in_reply_to = prev["message_id"]
+                step1_subject = prev["subject"]
+        elif in_reply_to and not keep_subject and step >= 2:
+            prev = conn.execute(
+                """
+                SELECT subject FROM emails
+                WHERE lead_id = ? AND step = 1
+                ORDER BY sent_at DESC LIMIT 1
+                """,
+                (lead_id,),
+            ).fetchone()
+            if prev:
                 step1_subject = prev["subject"]
 
         from_email = settings.from_email
@@ -183,13 +197,17 @@ def send(
             signature = account.get("signature") or ""
             postal = account.get("postal_address") or ""
 
+        # Human reply drafts keep their subject; sequence follow-ups may rewrite to Re:
+        compose_step = step if (in_reply_to or step >= 2) else step
+        if keep_subject:
+            step1_subject = None
         composed = compose(
             subject=subject,
             body=body,
             to_addr=envelope_to,
             from_email=from_email,
             display_name=display_name,
-            step=step,
+            step=max(compose_step, 2) if in_reply_to else compose_step,
             in_reply_to=in_reply_to,
             step1_subject=step1_subject,
             signature=signature,

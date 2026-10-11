@@ -64,6 +64,9 @@ def list_accounts(db_path: str | None = None) -> list[dict[str, Any]]:
             d = dict(r)
             d.pop("password_enc", None)
             d["has_password"] = bool(r["password_enc"])
+            d["agent_enabled"] = int(
+                r["agent_enabled"] if "agent_enabled" in r.keys() and r["agent_enabled"] is not None else 1
+            )
             sent = conn.execute(
                 "SELECT COUNT(*) AS n FROM mail_send_log WHERE account_id = ? AND ts >= ?",
                 (r["id"], since_s),
@@ -94,6 +97,11 @@ def get_account(account_id: str, db_path: str | None = None) -> dict[str, Any] |
         d = dict(row)
         d.pop("password_enc", None)
         d["has_password"] = bool(row["password_enc"])
+        d["agent_enabled"] = int(
+            row["agent_enabled"]
+            if "agent_enabled" in row.keys() and row["agent_enabled"] is not None
+            else 1
+        )
         try:
             d["test_recipients"] = json.loads(row["test_recipients_json"] or "[]")
         except Exception:  # noqa: BLE001
@@ -227,6 +235,9 @@ def update_account(
         if password and password.strip():
             sets.append("password_enc = ?")
             args.append(encrypt_secret(password.strip()))
+            # Reconnect: new app password restores inbox agent
+            sets.append("agent_enabled = 1")
+            sets.append("last_error = NULL")
         sets.append("updated_at = ?")
         args.append(_now())
         args.append(account_id)
@@ -264,6 +275,56 @@ def set_account_status(
                 _now(),
                 account_id,
             ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def disconnect_agent(account_id: str, db_path: str | None = None) -> None:
+    """Disable inbox agent, wipe app password, cancel pending reply drafts for account."""
+    settings = get_settings()
+    path = db_path or settings.db_path
+    init_db(path)
+    conn = connect(path)
+    try:
+        row = conn.execute(
+            "SELECT id FROM mail_accounts WHERE id = ?", (account_id,)
+        ).fetchone()
+        if not row:
+            raise KeyError("not_found")
+        conn.execute(
+            """
+            UPDATE mail_accounts
+            SET agent_enabled = 0, status = 'disabled', password_enc = NULL,
+                last_error = 'Disconnected by user — re-enter app password to reconnect.',
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (_now(), account_id),
+        )
+        # Cancel pending reply drafts for leads that used this account
+        conn.execute(
+            """
+            UPDATE reply_drafts SET status = 'cancelled', updated_at = ?
+            WHERE status = 'pending'
+              AND lead_id IN (
+                SELECT DISTINCT e.lead_id FROM emails e
+                WHERE e.mail_account_id = ?
+              )
+            """,
+            (_now(), account_id),
+        )
+        conn.execute(
+            """
+            UPDATE meeting_proposals SET status = 'cancelled', updated_at = ?
+            WHERE status = 'proposed'
+              AND lead_id IN (
+                SELECT DISTINCT e.lead_id FROM emails e
+                WHERE e.mail_account_id = ?
+              )
+            """,
+            (_now(), account_id),
         )
         conn.commit()
     finally:

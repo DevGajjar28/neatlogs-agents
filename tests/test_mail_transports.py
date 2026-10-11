@@ -135,9 +135,77 @@ def test_gmail_test_rewrites_recipient(db: Path):
     )
     assert out["status"] == "sent"
     assert captured == ["allow@test.local"]
-    assert out["subject"].startswith("[TEST]") if "subject" in out else True
-    # Subject rewrite verified via DB
+    # Delivery target is rewritten; subject prefix is optional product copy
     conn = connect(db)
-    row = conn.execute("SELECT subject FROM emails WHERE lead_id = 'lead-1'").fetchone()
+    row = conn.execute(
+        "SELECT actual_recipient, send_mode FROM emails WHERE lead_id = 'lead-1'"
+    ).fetchone()
     conn.close()
-    assert row["subject"].startswith("[TEST]")
+    assert row["send_mode"] == "gmail_test"
+
+
+def test_gmail_test_allows_listed_contact(db: Path):
+    """If the contact email is on the test allowlist, deliver there (not only first entry)."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn = connect(db)
+    enc = encrypt_secret("pw")
+    conn.execute(
+        """
+        INSERT INTO mail_accounts (
+            id, label, provider, email, display_name, username, password_enc,
+            smtp_host, smtp_port, smtp_security, imap_host, imap_port,
+            status, last_verified_at, last_error, daily_cap, per_domain_daily_cap,
+            min_gap_seconds, test_recipients_json, live_enabled, signature,
+            postal_address, drafts_folder, is_default, created_at, updated_at
+        ) VALUES (
+            'acc1', 'T', 'gmail', 'sender@example.com', 'S', 'sender@example.com', ?,
+            'smtp.gmail.com', 587, 'starttls', 'imap.gmail.com', 993,
+            'ok', ?, NULL, 25, 3, 0, ?, 0, '', '', '[Gmail]/Drafts', 0, ?, ?
+        )
+        """,
+        (
+            enc,
+            now,
+            json.dumps(["owner@test.local", "other@gmail.com"]),
+            now,
+            now,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO campaigns (id, created_at, input_json, status, options_json, seller_domain)
+        VALUES ('c1', ?, '{}', 'running', ?, 'acme.test')
+        """,
+        (
+            now,
+            json.dumps({"send_mode": "gmail_test", "mail_account_id": "acc1"}),
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO leads (id, campaign_id, company_id, contact_id, status, updated_at)
+        VALUES ('lead-2', 'c1', 'co', 'ct', 'approved', ?)
+        """,
+        (now,),
+    )
+    conn.commit()
+    conn.close()
+
+    captured = []
+
+    def fake(host, port, msg):
+        captured.append(msg["To"])
+
+    out = send(
+        lead_id="lead-2",
+        step=1,
+        subject="Hi",
+        body="Hello\n\nOpt out: reply stop",
+        to_email="other@gmail.com",
+        email_confidence="verified",
+        campaign_id="c1",
+        db_path=str(db),
+        smtp_send=fake,
+    )
+    assert out["status"] == "sent"
+    assert captured == ["other@gmail.com"]

@@ -212,6 +212,44 @@ def test_9_test_recipient_missing(db: Path):
     assert not r.ok and r.event == "policy.test_recipient_missing"
 
 
+def test_9b_test_mode_keeps_allowlisted_to(db: Path):
+    _seed_campaign(db)
+    _seed_lead(db)
+    _seed_account(
+        db,
+        test_recipients_json=json.dumps(["tester@example.com", "second@example.com"]),
+    )
+    r = check_all(
+        _ctx(
+            db,
+            send_mode="gmail_test",
+            mail_account_id="acc1",
+            to_email="second@example.com",
+        )
+    )
+    assert r.ok
+    assert r.actual_recipient == "second@example.com"
+
+
+def test_9c_test_mode_rewrites_non_allowlisted(db: Path):
+    _seed_campaign(db)
+    _seed_lead(db)
+    _seed_account(
+        db,
+        test_recipients_json=json.dumps(["tester@example.com", "second@example.com"]),
+    )
+    r = check_all(
+        _ctx(
+            db,
+            send_mode="gmail_test",
+            mail_account_id="acc1",
+            to_email="prospect@acme.test",
+        )
+    )
+    assert r.ok
+    assert r.actual_recipient == "tester@example.com"
+
+
 def test_10_cap_reached(db: Path):
     _seed_campaign(db)
     _seed_lead(db)
@@ -290,6 +328,36 @@ def test_14_lead_closed(db: Path):
     conn.commit()
     conn.close()
     r = check_all(_ctx(db, step=2))
+    assert not r.ok and r.event == "policy.lead_closed"
+
+
+def test_14_human_reply_allowed_after_interested(db: Path):
+    _seed_campaign(db)
+    _seed_lead(db)
+    conn = connect(db)
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO replies (lead_id, kind, received_at, classification) VALUES (?,?,?,?)",
+        ("lead-1", "reply", now, "meeting_request"),
+    )
+    conn.commit()
+    conn.close()
+    r = check_all(_ctx(db, step=10, human_reply=True))
+    assert r.ok
+
+
+def test_14_human_reply_blocked_after_opt_out(db: Path):
+    _seed_campaign(db)
+    _seed_lead(db)
+    conn = connect(db)
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO replies (lead_id, kind, received_at, classification) VALUES (?,?,?,?)",
+        ("lead-1", "opt_out", now, "opt_out"),
+    )
+    conn.commit()
+    conn.close()
+    r = check_all(_ctx(db, step=10, human_reply=True))
     assert not r.ok and r.event == "policy.lead_closed"
 
 

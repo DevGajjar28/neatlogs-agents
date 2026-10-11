@@ -903,11 +903,46 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
             """,
             (campaign_id,),
         ).fetchall()
+        reply_class_rows = conn.execute(
+            """
+            SELECT r.lead_id, r.classification
+            FROM replies r
+            JOIN leads l ON l.id = r.lead_id
+            WHERE l.campaign_id = ?
+            ORDER BY r.received_at DESC
+            """,
+            (campaign_id,),
+        ).fetchall()
+        draft_rows = conn.execute(
+            """
+            SELECT id, lead_id, status FROM reply_drafts
+            WHERE campaign_id = ? AND status = 'pending'
+            """,
+            (campaign_id,),
+        ).fetchall()
+        finance_n = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM events
+            WHERE campaign_id = ? AND type = 'policy.finance_skipped'
+            """,
+            (campaign_id,),
+        ).fetchone()["n"]
     finally:
         conn.close()
     emails_by_lead: dict[str, list[dict[str, Any]]] = {}
     for er in email_rows:
         emails_by_lead.setdefault(str(er["lead_id"]), []).append(dict(er))
+    reply_class_by_lead: dict[str, str] = {}
+    for rr in reply_class_rows:
+        lid = str(rr["lead_id"])
+        if lid not in reply_class_by_lead and rr["classification"]:
+            reply_class_by_lead[lid] = str(rr["classification"])
+    draft_by_lead: dict[str, dict[str, str]] = {}
+    for dr in draft_rows:
+        draft_by_lead[str(dr["lead_id"])] = {
+            "id": str(dr["id"]),
+            "status": str(dr["status"]),
+        }
     seller_raw = state_reader.seller(campaign_id) or {}
     seller_name = str(seller_raw.get("company_name") or "")
     out: list[LeadRow] = []
@@ -946,6 +981,7 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
         )
         if company_id:
             seen_companies.add(company_id)
+        draft_info = draft_by_lead.get(str(r["id"]))
         out.append(
             LeadRow(
                 lead_id=r["id"],
@@ -963,6 +999,10 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
                 status=status,
                 updated_at=r["updated_at"],
                 contact_id=contact_id or None,
+                reply_classification=reply_class_by_lead.get(str(r["id"])),
+                reply_draft_status=draft_info["status"] if draft_info else None,
+                reply_draft_id=draft_info["id"] if draft_info else None,
+                finance_skipped_count=int(finance_n or 0),
                 **seq,
             )
         )
@@ -1089,6 +1129,30 @@ def add_manual_contact(
             "why_now": ["User-provided contact; research did not find a person."],
             "evidence": [],
         }
+        accounts[company_id] = account_raw
+    else:
+        # Manual / seed paths may have thin or invalid evidence — keep story, drop bad cards.
+        account_raw = dict(account_raw)
+        account_raw["company_id"] = company_id
+        account_raw.setdefault(
+            "story",
+            f"{company.get('name') or company_id} was on your target list.",
+        )
+        account_raw.setdefault(
+            "why_now",
+            ["User-provided contact; research did not find a person."],
+        )
+        safe_ev = []
+        for ev in account_raw.get("evidence") or []:
+            if not isinstance(ev, dict):
+                continue
+            try:
+                from app.models import EvidenceCard
+
+                safe_ev.append(EvidenceCard.model_validate(ev).model_dump(mode="json"))
+            except Exception:  # noqa: BLE001
+                continue
+        account_raw["evidence"] = safe_ev
         accounts[company_id] = account_raw
 
     contact_id = f"{company_id}:user:{uuid.uuid4().hex[:8]}"

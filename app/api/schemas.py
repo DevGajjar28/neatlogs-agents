@@ -134,6 +134,42 @@ class EventOut(BaseModel):
     trace_ref: str | None = None
 
 
+class MeetingSlotOut(BaseModel):
+    label: str
+    start_iso: str | None = None
+
+
+class MeetingProposalOut(BaseModel):
+    id: str
+    slots: list[MeetingSlotOut] = Field(default_factory=list)
+    booking_link: str | None = None
+    status: str = "proposed"
+    notes: str | None = None
+    calendar_event_id: str | None = None
+    calendar_html_link: str | None = None
+
+
+class ReplyDraftOut(BaseModel):
+    id: str
+    lead_id: str
+    campaign_id: str
+    classification: str
+    subject: str
+    body: str
+    status: str
+    in_reply_to: str | None = None
+    meeting: MeetingProposalOut | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ReplyDraftDecideIn(BaseModel):
+    action: Literal["approve", "reject"]
+    subject: str | None = None
+    body: str | None = None
+    selected_slot_label: str | None = None
+
+
 class LeadRow(BaseModel):
     lead_id: str
     company_id: str | None = None
@@ -162,6 +198,10 @@ class LeadRow(BaseModel):
     followup_2_editable: bool = True
     claims: list[DraftClaimOut] = Field(default_factory=list)
     has_internal_refs: bool = False
+    reply_classification: str | None = None
+    reply_draft_status: str | None = None
+    reply_draft_id: str | None = None
+    finance_skipped_count: int = 0
 
 
 class ManualContactIn(BaseModel):
@@ -328,6 +368,16 @@ class SystemStatusOut(BaseModel):
     mail_account_error: bool = False
 
 
+class CalendarStatusOut(BaseModel):
+    configured: bool = False
+    connected: bool = False
+    email: str | None = None
+    status: str = "disconnected"
+    updated_at: str | None = None
+    scope: str = "https://www.googleapis.com/auth/calendar.events"
+    redirect_uri: str = ""
+
+
 class MailAccountOut(BaseModel):
     id: str
     label: str
@@ -353,6 +403,7 @@ class MailAccountOut(BaseModel):
     drafts_folder: str | None = None
     is_default: bool = False
     has_password: bool = False
+    agent_enabled: bool = True
     sent_24h: int = 0
     cap: int = 25
     created_at: str | None = None

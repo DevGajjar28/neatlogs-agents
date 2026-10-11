@@ -215,6 +215,46 @@ CREATE TABLE IF NOT EXISTS email_templates (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS reply_drafts (
+    id TEXT PRIMARY KEY,
+    lead_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    reply_id INTEGER,
+    classification TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    in_reply_to TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS meeting_proposals (
+    id TEXT PRIMARY KEY,
+    lead_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    reply_draft_id TEXT,
+    slots_json TEXT NOT NULL DEFAULT '[]',
+    booking_link TEXT,
+    status TEXT NOT NULL DEFAULT 'proposed',
+    notes TEXT,
+    calendar_event_id TEXT,
+    calendar_html_link TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS calendar_accounts (
+    id TEXT PRIMARY KEY,
+    email TEXT,
+    refresh_token_enc TEXT,
+    access_token_enc TEXT,
+    token_expiry TEXT,
+    status TEXT NOT NULL DEFAULT 'disconnected',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 TABLES = (
@@ -236,6 +276,9 @@ TABLES = (
     "mail_accounts",
     "mail_send_log",
     "email_templates",
+    "reply_drafts",
+    "meeting_proposals",
+    "calendar_accounts",
 )
 
 _CAMPAIGN_COLS = {
@@ -263,6 +306,15 @@ _REPLY_COLS = {
     "classification": "TEXT",
     "snippet": "TEXT",
     "source": "TEXT",
+}
+
+_MAIL_ACCOUNT_COLS = {
+    "agent_enabled": "INTEGER NOT NULL DEFAULT 1",
+}
+
+_MEETING_PROPOSAL_COLS = {
+    "calendar_event_id": "TEXT",
+    "calendar_html_link": "TEXT",
 }
 
 
@@ -296,6 +348,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _add_cols(conn, "campaigns", _CAMPAIGN_COLS)
     _add_cols(conn, "emails", _EMAIL_COLS)
     _add_cols(conn, "replies", _REPLY_COLS)
+    _add_cols(conn, "mail_accounts", _MAIL_ACCOUNT_COLS)
+    _add_cols(conn, "meeting_proposals", _MEETING_PROPOSAL_COLS)
 
 
 def init_db(db_path: str | Path) -> None:
