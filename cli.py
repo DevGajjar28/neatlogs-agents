@@ -449,11 +449,21 @@ def approve(
 def serve(
     with_worker: bool = typer.Option(False, "--with-worker", help="Also poll scheduled follow-ups"),
     port: int = typer.Option(8000, help="API port"),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        help="Bind address (default: API_HOST env or 127.0.0.1). Use 0.0.0.0 on EC2.",
+    ),
 ) -> None:
-    """Serve the JSON API on 127.0.0.1 (UI later on :3000). Keep serve-ui for :8080 gates."""
+    """Serve the JSON API. Local default 127.0.0.1; EC2 set API_HOST=0.0.0.0."""
     import threading
 
     import uvicorn
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    bind_host = (host or settings.api_host or "127.0.0.1").strip() or "127.0.0.1"
 
     if with_worker:
         from app.scheduler.worker import run_forever
@@ -466,8 +476,8 @@ def serve(
         )
         thread.start()
         typer.echo("worker thread started (poll=20s)")
-    typer.echo(f"API http://127.0.0.1:{port}/api/health")
-    uvicorn.run("app.api.main:app", host="127.0.0.1", port=port, reload=False)
+    typer.echo(f"API http://{bind_host}:{port}/api/health")
+    uvicorn.run("app.api.main:app", host=bind_host, port=port, reload=False)
 
 
 @app.command("serve-ui")

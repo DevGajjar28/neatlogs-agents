@@ -1,0 +1,19 @@
+[Unit]
+Description=SignalSDR API + IMAP/follow-up worker
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/neatlogs
+EnvironmentFile=/home/ec2-user/neatlogs/.env
+# Bind for Vercel rewrite / public health checks. Local default remains 127.0.0.1 via .env.
+Environment=API_HOST=0.0.0.0
+ExecStart=/home/ec2-user/neatlogs/.venv/bin/python cli.py serve --port 8000 --with-worker --host 0.0.0.0
+Restart=on-failure
+RestartSec=5
+# Soften OOM risk on t2.micro during Live campaign child processes
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

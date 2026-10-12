@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     google_calendar_notify_attendees: bool = False
     ui_base_url: str = "http://localhost:3000"
 
+    # Deploy: bind 0.0.0.0 on EC2; keep 127.0.0.1 for local.
+    api_host: str = "127.0.0.1"
+    # Comma-separated browser origins (local + Vercel). Empty → localhost:3000 only.
+    cors_origins: str = "http://localhost:3000"
+
+
+def cors_origin_list(settings: Settings | None = None) -> list[str]:
+    s = settings or get_settings()
+    raw = (s.cors_origins or "").strip()
+    if not raw:
+        return ["http://localhost:3000"]
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    return origins or ["http://localhost:3000"]
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

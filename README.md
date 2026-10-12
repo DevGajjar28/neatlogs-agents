@@ -2,6 +2,10 @@
 
 Outbound agent for neatHack 2026. It researches a seller, finds lookalike buyers, and drafts email that can be sent only when each factual claim has a source. Demo mode never delivers to a real prospect.
 
+## Deploy (video demo)
+
+Vercel UI + EC2 API: see [`deploy/DEPLOY.md`](deploy/DEPLOY.md). Smoke: `python deploy/smoke_check.py --api http://EC2_IP:8000`.
+
 ## Setup
 
 Python 3.11 or newer.
