@@ -6,6 +6,7 @@ import {
   BarChart3,
   FileText,
   Inbox,
+  LayoutDashboard,
   LayoutList,
   Plus,
   Send,
@@ -22,6 +23,7 @@ import {
 } from "@/components/ui/command";
 
 const NAV_ITEMS = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns", label: "Campaigns", icon: LayoutList },
   { href: "/approvals", label: "Approvals", icon: Inbox },
   { href: "/outbox", label: "Outbox", icon: Send },

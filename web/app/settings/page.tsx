@@ -60,7 +60,7 @@ export default function SettingsPage() {
             message={
               q.error instanceof ApiError
                 ? q.error.message
-                : "Can't reach SignalSDR right now. Start the backend, then try again."
+                : "Can't reach ReachPilot right now. Start the backend, then try again."
             }
             actionLabel="Retry"
             onAction={() => q.refetch()}

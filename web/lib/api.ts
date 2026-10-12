@@ -77,7 +77,7 @@ export async function api<T = unknown>(
     });
   } catch {
     throw new ApiError(
-      "Can't reach SignalSDR right now. Start the backend, then try again.",
+      "Can't reach ReachPilot right now. Start the backend, then try again.",
       0,
       null,
     );

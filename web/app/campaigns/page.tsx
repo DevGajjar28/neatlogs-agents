@@ -49,7 +49,7 @@ export default function CampaignsPage() {
       {q.data && q.data.length === 0 ? (
         <EmptyState
           title="No campaigns yet"
-          description="Paste your company's website. SignalSDR finds who buys from you, researches them, and drafts emails it can prove."
+          description="Paste your company's website. ReachPilot finds who buys from you, researches them, and drafts emails it can prove."
           actionLabel="New campaign"
           onAction={() => setNewCampaignOpen(true)}
         />

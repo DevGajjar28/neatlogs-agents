@@ -109,7 +109,7 @@ export default function OutboxPage() {
     <>
       <PageTitle title="Outbox" />
       <p className="mb-4 max-w-2xl text-[13px] leading-5 text-[var(--text-muted)]">
-        Everything SignalSDR has queued or delivered — open a row to read the copy, jump to
+        Everything ReachPilot has queued or delivered — open a row to read the copy, jump to
         the campaign, or check Gmail.
       </p>
 

@@ -297,7 +297,7 @@ export function NewCampaignDrawer() {
         <SheetHeader className="border-b border-[var(--border)] px-5 py-4">
           <SheetTitle className="text-[15px] font-semibold">New campaign</SheetTitle>
           <SheetDescription className="text-[13px] text-[var(--text-muted)]">
-            Tell SignalSDR who you sell to. It finds buyers, researches them, and drafts emails.
+            Tell ReachPilot who you sell to. It finds buyers, researches them, and drafts emails.
           </SheetDescription>
         </SheetHeader>
 

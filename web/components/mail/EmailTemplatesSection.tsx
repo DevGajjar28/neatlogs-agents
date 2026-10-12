@@ -30,7 +30,7 @@ import { queryKeys } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 
 const HELP =
-  'Write how you want emails to sound. Use sections like Voice, Email 1, Follow-up 1, Follow-up 2 and an example. You can use {{first_name}}, {{company}}, {{role}}, {{seller_name}}, {{sender_first_name}} in the template — SignalSDR replaces them with each lead\'s real name and company before send. The opt-out line, evidence checks and sending limits can\'t be turned off.';
+  'Write how you want emails to sound. Use sections like Voice, Email 1, Follow-up 1, Follow-up 2 and an example. You can use {{first_name}}, {{company}}, {{role}}, {{seller_name}}, {{sender_first_name}} in the template — ReachPilot replaces them with each lead\'s real name and company before send. The opt-out line, evidence checks and sending limits can\'t be turned off.';
 
 type Props = {
   /** When set, open this template read-only (e.g. from New campaign Preview). */

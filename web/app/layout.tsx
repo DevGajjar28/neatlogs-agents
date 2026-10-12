@@ -8,8 +8,9 @@ import "./globals.css";
 import "@/components/campaign/agent-pipeline.css";
 
 export const metadata: Metadata = {
-  title: "SignalSDR",
-  description: "Outbound agent control plane for neatHack",
+  title: "ReachPilot",
+  description:
+    "Agentic outbound that finds buyers, researches them, and sends evidence-backed email — traced with neatlogs, powered by Crustdata.",
 };
 
 export default function RootLayout({

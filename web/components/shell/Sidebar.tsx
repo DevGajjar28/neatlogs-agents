@@ -8,6 +8,7 @@ import {
   BarChart3,
   FileText,
   Inbox,
+  LayoutDashboard,
   LayoutList,
   PanelLeft,
   Send,
@@ -26,6 +27,7 @@ import { queryKeys } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 
 const NAV = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns", label: "Campaigns", icon: LayoutList },
   { href: "/approvals", label: "Approvals", icon: Inbox },
   { href: "/outbox", label: "Outbox", icon: Send },
@@ -90,13 +92,13 @@ export function Sidebar() {
         {!collapsed ? (
           <div className="flex items-baseline gap-1.5">
             <span className="text-[14px] font-semibold leading-5 text-[var(--text)]">
-              SignalSDR
+              ReachPilot
             </span>
             <span className="text-[11px] font-medium text-[var(--text-subtle)]">beta</span>
           </div>
         ) : (
-          <span className="text-[12px] font-semibold text-[var(--text)]" title="SignalSDR">
-            S
+          <span className="text-[12px] font-semibold text-[var(--text)]" title="ReachPilot">
+            R
           </span>
         )}
         <button
