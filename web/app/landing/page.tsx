@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import {
   Bot,
   Calendar,
+  Code2,
   Eye,
   GitBranch,
-  Github,
   Lock,
   Mail,
   Radio,
