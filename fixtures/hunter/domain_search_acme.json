@@ -1,0 +1,41 @@
+{
+  "data": {
+    "domain": "acme.test",
+    "organization": "Acme",
+    "emails": [
+      {
+        "value": "cto@acme.test",
+        "type": "personal",
+        "confidence": 92,
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "position": "CTO",
+        "seniority": "executive",
+        "department": "executive",
+        "linkedin": "https://www.linkedin.com/in/ada",
+        "twitter": null,
+        "phone_number": null,
+        "sources": []
+      },
+      {
+        "value": "info@acme.test",
+        "type": "generic",
+        "confidence": 70,
+        "first_name": null,
+        "last_name": null,
+        "position": null,
+        "seniority": null,
+        "department": null,
+        "linkedin": null,
+        "twitter": null,
+        "phone_number": null,
+        "sources": []
+      }
+    ]
+  },
+  "meta": {
+    "results": 2,
+    "limit": 10,
+    "offset": 0
+  }
+}

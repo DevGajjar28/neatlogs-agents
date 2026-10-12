@@ -291,17 +291,17 @@ export function NewCampaignDrawer() {
     <Sheet open={newCampaignOpen} onOpenChange={setNewCampaignOpen}>
       <SheetContent
         side="right"
-        className="w-full gap-0 border-l border-[var(--border)] bg-[var(--surface)] p-0 shadow-[var(--drawer-shadow)] sm:max-w-[480px]"
+        className="w-full gap-0 border-l border-[var(--border)] bg-[var(--surface)] p-0 shadow-[var(--drawer-shadow)] sm:max-w-[600px] data-[side=right]:w-full data-[side=right]:sm:max-w-[600px]"
         style={{ borderRadius: 0 }}
       >
-        <SheetHeader className="border-b border-[var(--border)] px-4 py-4">
-          <SheetTitle className="text-[14px] font-semibold">New campaign</SheetTitle>
+        <SheetHeader className="border-b border-[var(--border)] px-5 py-4">
+          <SheetTitle className="text-[15px] font-semibold">New campaign</SheetTitle>
           <SheetDescription className="text-[13px] text-[var(--text-muted)]">
             Tell SignalSDR who you sell to. It finds buyers, researches them, and drafts emails.
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <Field label="Company name" required>
             <Input
               value={companyName}
@@ -513,7 +513,7 @@ export function NewCampaignDrawer() {
               {(
                 [
                   ["replay", "Replay", "0 credits, cached data"],
-                  ["live", "Live", "Uses Crustdata credits"],
+                  ["live", "Live", "Crustdata first, then Hunter if set"],
                 ] as const
               ).map(([value, title, hint]) => (
                 <button
@@ -696,7 +696,7 @@ export function NewCampaignDrawer() {
           </div>
         </div>
 
-        <SheetFooter className="flex-row justify-end gap-2 border-t border-[var(--border)] px-4 py-3">
+        <SheetFooter className="flex-row justify-end gap-2 border-t border-[var(--border)] px-5 py-3">
           <Button
             type="button"
             variant="ghost"

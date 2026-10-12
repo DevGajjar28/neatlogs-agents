@@ -84,8 +84,21 @@ class _FakeClient:
         self.calls.append(("web_search", body))
         return {"results": []}
 
+    def web_fetch(self, body: dict, *, campaign_id: str = "default", step: str = "") -> Any:
+        self.calls.append(("web_fetch", body))
+        return {"results": []}
 
-def test_empty_people_triggers_explain_and_semantic_fallback():
+
+def test_empty_people_triggers_explain_and_semantic_fallback(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("DATA_MODE", "replay")
+    from app.config import clear_settings_cache
+
+    clear_settings_cache()
+    monkeypatch.setattr(
+        "app.agents.account_researcher.web.fetch_prospect_pages",
+        lambda *a, **k: [],
+    )
     company = Company(
         id="101",
         name="Acme",
@@ -177,6 +190,15 @@ def test_planner_replace_no_contact(monkeypatch):
 def test_enrich_chaos_empty_people_and_join(monkeypatch):
     set_chaos("empty_people")
     fake = _FakeClient()
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("DATA_MODE", "replay")
+    from app.config import clear_settings_cache
+
+    clear_settings_cache()
+    monkeypatch.setattr(
+        "app.agents.account_researcher.web.fetch_prospect_pages",
+        lambda *a, **k: [],
+    )
 
     monkeypatch.setattr(
         "app.agents.account_researcher.CrustdataClient",

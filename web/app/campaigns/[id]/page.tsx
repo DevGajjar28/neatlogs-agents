@@ -213,8 +213,8 @@ export default function CampaignRunPage() {
             <div className="border-b border-[var(--border)] px-4 py-3">
               <h3 className="text-[14px] font-semibold">Leads</h3>
               <p className="text-[12px] text-[var(--text-muted)]">
-                Open a row to edit the email sequence. If research finds no person, use Add
-                contact.
+                Click a company name for research. Open a row to edit the email sequence. If
+                research finds no person, use Add contact.
               </p>
             </div>
             {(leadsQ.data || []).length === 0 ? (

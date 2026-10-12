@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     crustdata_api_key: str = ""
     crustdata_api_version: str = "2025-11-01"
     crustdata_base_url: str = "https://api.crustdata.com"
+    hunter_api_key: str = ""
+    hunter_base_url: str = "https://api.hunter.io/v2"
 
     llm_provider: Literal["bedrock"] = "bedrock"
     aws_profile: str = ""

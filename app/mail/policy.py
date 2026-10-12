@@ -22,6 +22,14 @@ ROLE_ALWAYS_BLOCK = frozenset(
 URL_SHORTENERS = frozenset(
     {"bit.ly", "t.co", "goo.gl", "tinyurl.com", "ow.ly", "buff.ly", "rebrand.ly"}
 )
+# Autopilot meeting confirmations include Google Meet links.
+ALLOWED_EXTERNAL_HOSTS = frozenset(
+    {
+        "meet.google.com",
+        "calendar.google.com",
+        "www.google.com",  # rare calendar redirect hosts
+    }
+)
 URL_RE = re.compile(r"https?://([^\s/]+)", re.IGNORECASE)
 
 HARD_MAX_DAILY = 100
@@ -354,6 +362,8 @@ def _check_all_conn(conn, ctx: PolicyContext, settings) -> PolicyResult:
         host = m.group(1).lower().split(":")[0]
         if host in URL_SHORTENERS:
             return _fail("policy.content", "shortener")
+        if host in ALLOWED_EXTERNAL_HOSTS or host.endswith(".meet.google.com"):
+            continue
         if ctx.seller_domain and host != ctx.seller_domain.lower() and not host.endswith(
             "." + ctx.seller_domain.lower()
         ):

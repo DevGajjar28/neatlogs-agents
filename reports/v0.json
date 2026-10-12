@@ -1,25 +1,29 @@
 {
-  "campaign_id": "ui-654fc9350e",
-  "seller": "Mindarmor",
+  "campaign_id": "ui-f29c5acaf6",
+  "seller": "Meruksha",
   "n": 1,
   "data_mode": "live",
   "credits_spent": 0.0,
   "credits_by_step": {
+    "account.enrich": 0.0,
+    "account.news_web": 0.0,
+    "account.person_search": 0.0,
+    "account.person_search.explain": 0.0,
+    "account.person_search.semantic": 0.0,
     "buyers.import_identify": 0.0,
     "doctor": 0.0,
-    "product.enrich": 0.0,
     "product.identify": 0.0
   },
-  "cache_hit_rate": 0.9,
-  "cache_hits": 9,
-  "cache_total": 10,
+  "cache_hit_rate": 0.9545454545454546,
+  "cache_hits": 21,
+  "cache_total": 22,
   "tokens": null,
   "llm_cost": null,
   "tokens_note": "unavailable locally; read neatlogs dashboard for the campaign",
-  "wall_clock_seconds": 17.597323894500732,
-  "companies_found": 0,
+  "wall_clock_seconds": 44.13455891609192,
+  "companies_found": 1,
   "companies_kept": 0,
-  "companies_dropped": 0,
+  "companies_dropped": 1,
   "contacts_found": 0,
   "contacts_by_fallback_step": {},
   "verifier_pass": 0,
@@ -29,11 +33,13 @@
   "emails_sent": 0,
   "followups_sent": 0,
   "followups_cancelled": 0,
-  "recoveries_by_type": {},
+  "recoveries_by_type": {
+    "recovery.explain_retry": 1
+  },
   "cost_per_qualified_lead": null,
   "qualified_leads": 0,
-  "errors": 1,
-  "events": 7,
+  "errors": 0,
+  "events": 13,
   "halt_reason": null,
   "reconciled": null,
   "reconcile_note": "not reconciled (usage/events fetched; X-Request-Id join not automated yet)",
@@ -45,11 +51,6 @@
       "max_credits": 400
     },
     {
-      "type": "error",
-      "step": "product_researcher",
-      "detail": "Insufficient credits. Buy credits at https://app.crustdata.com/billing/credits or reach out to the Crustdata sales team."
-    },
-    {
       "type": "product.no_customers",
       "detail": "buyer_finder will use low-confidence ICP"
     },
@@ -58,14 +59,52 @@
       "n": 1
     },
     {
-      "type": "buyers.import_not_found",
-      "domain": "meruksha.com",
-      "company": "meruksha"
+      "type": "buyers.import_matched",
+      "company": "MindArmor.ai",
+      "domain": "mindarmor.ai"
     },
     {
       "type": "buyers.import_done",
-      "matched": 0,
+      "matched": 1,
       "n": 1
+    },
+    {
+      "type": "account.enriched",
+      "count": 1
+    },
+    {
+      "type": "account.researching",
+      "company": "MindArmor.ai",
+      "company_id": "60587007"
+    },
+    {
+      "type": "account.web_fetch",
+      "company_id": "60587007",
+      "pages": 1,
+      "source": "httpx"
+    },
+    {
+      "type": "account.news_web_fallback",
+      "company_id": "60587007"
+    },
+    {
+      "type": "recovery.explain_retry",
+      "company_id": "60587007",
+      "culprit_paths": [
+        "filters.conditions[0]"
+      ],
+      "remarks_codes": [
+        "condition_eliminates_all"
+      ]
+    },
+    {
+      "type": "fallback.skipped_not_enabled",
+      "company_id": "60587007",
+      "endpoint": "/person/professional_network/search/live"
+    },
+    {
+      "type": "account.no_contact",
+      "company_id": "60587007"
     },
     {
       "type": "plan.no_contacts",

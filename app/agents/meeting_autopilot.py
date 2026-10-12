@@ -15,7 +15,7 @@ from app.infra.events import record_event
 from app.tools.mailer import PolicyDenied, send
 
 
-def _contact_email(campaign_id: str, contact_id: str | None) -> str | None:
+def _contact_for_lead(campaign_id: str, contact_id: str | None) -> dict[str, Any]:
     from app.api import state_reader
 
     contacts = {
@@ -23,7 +23,11 @@ def _contact_email(campaign_id: str, contact_id: str | None) -> str | None:
         for c in state_reader.contacts(campaign_id)
         if isinstance(c, dict) and c.get("id")
     }
-    contact = contacts.get(contact_id or "") or {}
+    return contacts.get(contact_id or "") or {}
+
+
+def _contact_email(campaign_id: str, contact_id: str | None) -> str | None:
+    contact = _contact_for_lead(campaign_id, contact_id)
     email = str(contact.get("email") or "").strip()
     return email if email else None
 
@@ -82,7 +86,12 @@ def handle_meeting_confirmed(
         lead = conn.execute(
             "SELECT contact_id FROM leads WHERE id = ?", (lead_id,)
         ).fetchone()
-        to_email = _contact_email(campaign_id, lead["contact_id"] if lead else None)
+        contact = _contact_for_lead(campaign_id, lead["contact_id"] if lead else None)
+        to_email = str(contact.get("email") or "").strip() or None
+        email_confidence = str(contact.get("email_confidence") or "verified")
+        # User / autopilot replies are human-validated destinations.
+        if contact.get("email_source") == "user":
+            email_confidence = "verified"
         ctx = _last_meeting_context(conn, lead_id)
     finally:
         conn.close()
@@ -192,6 +201,7 @@ def handle_meeting_confirmed(
             subject=subj[:160],
             body=body,
             to_email=to_email,
+            email_confidence=email_confidence,
             campaign_id=campaign_id,
             actor="meeting_autopilot",
             db_path=path,
@@ -200,7 +210,16 @@ def handle_meeting_confirmed(
             thread_in_reply_to=in_reply_to,
             keep_subject=True,
         )
-    except PolicyDenied:
+    except PolicyDenied as exc:
+        record_event(
+            campaign_id,
+            getattr(exc, "event", None) or "policy.denied",
+            "meeting_autopilot",
+            f"Meeting confirm blocked: {exc}",
+            lead_id=lead_id,
+            data={"error": str(exc)},
+            db_path=path,
+        )
         return False
 
     record_event(
@@ -242,27 +261,20 @@ def handle_meeting_proposal_autopilot(
         in_reply_to=in_reply_to,
         contact_name=contact_name,
     )
-    result = run_decision_for_ticket(ticket, use_llm=True, db_path=path)
-    draft_id = result.get("draft_id")
-    if not draft_id:
-        return False
-
     conn = connect(path)
     try:
-        from app.api import state_reader
-
         lead = conn.execute("SELECT contact_id FROM leads WHERE id = ?", (lead_id,)).fetchone()
         contact_id = lead["contact_id"] if lead else None
-        contacts = {
-            c["id"]: c
-            for c in state_reader.contacts(campaign_id)
-            if isinstance(c, dict) and c.get("id")
-        }
-        contact = contacts.get(contact_id or "") or {}
+        contact = _contact_for_lead(campaign_id, contact_id)
         to_email = str(contact.get("email") or "").strip()
     finally:
         conn.close()
     if not to_email:
+        return False
+
+    result = run_decision_for_ticket(ticket, use_llm=True, db_path=path)
+    draft_id = result.get("draft_id")
+    if not draft_id:
         return False
 
     from app.agents.reply_decision import approve_and_send_reply_draft
@@ -274,6 +286,8 @@ def handle_meeting_proposal_autopilot(
             db_path=path,
         )
     except (PolicyDenied, KeyError, ValueError):
+        # Don't leave a pending HITL draft when Autopilot owns the flow.
+        _cancel_pending_drafts(lead_id, db_path=path)
         return False
     record_event(
         campaign_id,
@@ -285,6 +299,33 @@ def handle_meeting_proposal_autopilot(
         db_path=path,
     )
     return True
+
+
+def _cancel_pending_drafts(lead_id: str, *, db_path: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn = connect(db_path)
+    try:
+        conn.execute(
+            """
+            UPDATE reply_drafts SET status = 'cancelled', updated_at = ?
+            WHERE lead_id = ? AND status = 'pending'
+            """,
+            (now, lead_id),
+        )
+        conn.execute(
+            """
+            UPDATE meeting_proposals SET status = 'cancelled', updated_at = ?
+            WHERE lead_id = ? AND status = 'proposed'
+            """,
+            (now, lead_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def snippet_has_concrete_time(snippet: str) -> bool:
+    return parse_meeting_time_from_text(snippet or "") is not None
 
 
 def try_autopilot_inbound(
@@ -317,7 +358,24 @@ def try_autopilot_inbound(
     if not campaign_autopilot_from_db_options(opts):
         return False
 
+    # Prospect named a time → book Meet + confirm email. Never leave a slot-picker draft.
+    concrete = snippet_has_concrete_time(snippet)
+    if classification in {"meeting_confirmed", "meeting_request", "interested"} and concrete:
+        _cancel_pending_drafts(lead_id, db_path=path)
+        ok = handle_meeting_confirmed(
+            lead_id=lead_id,
+            campaign_id=campaign_id,
+            snippet=snippet,
+            in_reply_to=in_reply_to,
+            our_subject=our_subject,
+            db_path=path,
+        )
+        if ok:
+            return True
+        # Fall through only if booking failed (e.g. no contact email).
+
     if classification == "meeting_confirmed":
+        _cancel_pending_drafts(lead_id, db_path=path)
         return handle_meeting_confirmed(
             lead_id=lead_id,
             campaign_id=campaign_id,
@@ -327,6 +385,7 @@ def try_autopilot_inbound(
             db_path=path,
         )
     if classification == "meeting_request":
+        # No concrete time yet — propose slots and send automatically (no HITL).
         return handle_meeting_proposal_autopilot(
             lead_id=lead_id,
             campaign_id=campaign_id,
@@ -351,6 +410,7 @@ def try_autopilot_inbound(
                 "confirmed",
             )
         ):
+            _cancel_pending_drafts(lead_id, db_path=path)
             return handle_meeting_confirmed(
                 lead_id=lead_id,
                 campaign_id=campaign_id,

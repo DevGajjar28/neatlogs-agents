@@ -368,6 +368,28 @@ def test_15_content_shortener(db: Path):
     assert not r.ok and r.event == "policy.content"
 
 
+def test_15_meet_link_allowed(db: Path):
+    _seed_campaign(db)
+    _seed_lead(db)
+    r = check_all(
+        _ctx(
+            db,
+            body="Join Google Meet: https://meet.google.com/abc-defg-hij\n\nOpt out: reply stop",
+        )
+    )
+    assert r.ok
+
+
+def test_15_external_link_blocked(db: Path):
+    _seed_campaign(db)
+    _seed_lead(db)
+    r = check_all(
+        _ctx(db, body="See https://evil.example/x\n\nOpt out: reply stop")
+    )
+    assert not r.ok and r.event == "policy.content"
+    assert "external_link" in (r.reason or "")
+
+
 def test_16_live_requirements(db: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DEMO_MODE", "false")
     monkeypatch.setenv("ALLOW_LIVE_SENDS", "true")

@@ -79,6 +79,7 @@ def system_status() -> SystemStatusOut:
             "traces_url": settings.neatlogs_traces_url or None,
             "endpoint": settings.neatlogs_endpoint,
         },
+        hunter={"configured": bool(settings.hunter_api_key.strip())},
         max_send_mode=max_send_mode_allowed(),
         sending_paused=paused,
         mail_account_count=int(mail_count or 0),

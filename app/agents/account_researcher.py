@@ -13,11 +13,18 @@ from pydantic import BaseModel, Field
 from app.agents.evidence import make_evidence
 from app.config import get_settings
 from app.tools import web
-from app.infra.budget import ACCOUNT_FILE, load_account_prices
+from app.infra.budget import ACCOUNT_FILE, BudgetExceeded, load_account_prices
 from app.infra.chaos import get_chaos
 from app.llm import get_llm
 from app.models import AccountBrief, Company, Contact, ICPProposal
-from app.tools.crustdata import CrustdataClient, CrustdataError, client_for_campaign
+from app.tools.crustdata import (
+    CrustdataClient,
+    CrustdataError,
+    OutOfCredits,
+    campaign_data_mode,
+    client_for_campaign,
+)
+from app.tools import hunter as hunter_tool
 from app.infra.events import EventBag
 
 # Titles that can approve vendor spend. Individual contributors are never emailed.
@@ -226,6 +233,7 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
 
     client = client_for_campaign(state)
     campaign_id = state["campaign_id"]
+    data_mode = campaign_data_mode(state)
     email_by_url: dict[str, tuple[str | None, str, str]] = {}
     try:
         urls = [u for _, u, _ in pending_urls][:25]
@@ -241,27 +249,59 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
                 )
                 events.append({"type": "account.person_enrich_batch", "count": len(urls)})
                 email_by_url = _emails_from_person_enrich(enriched)
-            except CrustdataError as exc:
+            except (CrustdataError, OutOfCredits, BudgetExceeded) as exc:
                 errors.append({"step": "account.person_enrich_batch", "error": str(exc)})
+                events.append(
+                    {
+                        "type": "fallback.hunter_eligible",
+                        "reason": type(exc).__name__,
+                        "count": len(urls),
+                    }
+                )
 
         for company_id, person in contacts_by_company.items():
             profile_url = person.get("profile_url")
-            email = None
-            email_source = "none"
-            email_confidence = "none"
+            email = person.get("email")
+            email_source = str(person.get("email_source") or "none")
+            email_confidence = str(person.get("email_confidence") or "none")
             if profile_url and profile_url in email_by_url:
                 email, email_source, email_confidence = email_by_url[profile_url]
             if person.get("match_status") == "redacted":
                 events.append({"type": "policy.redacted", "company_id": company_id})
                 continue
-            if not email and profile_url:
-                company = by_id.get(company_id)
-                domain = (company.domain if company else "") or ""
+            company = by_id.get(company_id)
+            domain = (company.domain if company else "") or ""
+            name = str(person.get("name") or "")
+            # Crustdata miss / credit failure → Hunter Email Finder → pattern guess
+            if not email and domain and name:
+                hunter_hit = hunter_tool.find_email_for_person(
+                    domain=domain,
+                    name=name,
+                    data_mode=data_mode,
+                )
+                if hunter_hit:
+                    email, email_source, email_confidence = hunter_hit
+                    events.append(
+                        {
+                            "type": "fallback.hunter_email",
+                            "company_id": company_id,
+                            "domain": domain,
+                        }
+                    )
+                else:
+                    events.append(
+                        {
+                            "type": "fallback.hunter_skipped",
+                            "company_id": company_id,
+                            "reason": "no_hit_or_unconfigured",
+                        }
+                    )
+            if not email and domain and name:
                 guessed = _pattern_guess_email(
                     client,
                     company_id=company_id,
                     domain=domain,
-                    name=str(person.get("name") or ""),
+                    name=name,
                     campaign_id=campaign_id,
                     events=events,
                     errors=errors,
@@ -639,6 +679,35 @@ def _find_person(
                 "type": "fallback.skipped_not_enabled",
                 "company_id": company.id,
                 "endpoint": "/person/professional_network/search/live",
+            }
+        )
+
+    # 4) Hunter Domain Search when Crustdata yielded no person
+    domain = (company.domain or "").strip()
+    if domain:
+        mode = getattr(client, "data_mode", None)
+        if mode not in {"replay", "live"}:
+            mode = "live"
+        hunter_person = hunter_tool.find_person_from_domain(
+            domain=domain,
+            titles=titles,
+            data_mode=mode,  # type: ignore[arg-type]
+            is_decision_maker=is_decision_maker,
+        )
+        if hunter_person:
+            events.append(
+                {
+                    "type": "fallback.hunter_domain",
+                    "company_id": company.id,
+                    "domain": domain,
+                }
+            )
+            return hunter_person
+        events.append(
+            {
+                "type": "fallback.hunter_skipped",
+                "company_id": company.id,
+                "reason": "domain_search_miss",
             }
         )
 

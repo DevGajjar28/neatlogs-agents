@@ -1,0 +1,27 @@
+{
+  "data": {
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "email": "ada@acme.test",
+    "score": 94,
+    "domain": "acme.test",
+    "accept_all": false,
+    "position": "CTO",
+    "twitter": null,
+    "linkedin_url": "https://www.linkedin.com/in/ada",
+    "phone_number": null,
+    "company": "Acme",
+    "sources": [],
+    "verification": {
+      "date": "2026-10-01",
+      "status": "valid"
+    }
+  },
+  "meta": {
+    "params": {
+      "first_name": "Ada",
+      "last_name": "Lovelace",
+      "domain": "acme.test"
+    }
+  }
+}

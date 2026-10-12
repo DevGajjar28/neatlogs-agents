@@ -686,6 +686,10 @@ export interface components {
             neatlogs: {
                 [key: string]: unknown;
             };
+            /** Hunter.io fallback */
+            hunter?: {
+                [key: string]: unknown;
+            };
         };
         /** ValidationError */
         ValidationError: {

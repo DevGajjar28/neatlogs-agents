@@ -169,16 +169,24 @@ def test_reject_redraft_pass_loop(monkeypatch):
     )
     g.add_edge(START, "email_writer")
     g.add_edge("email_writer", "verifier")
+    g.add_node("autopilot_gate", lambda s: {"plan": {**(s.get("plan") or {}), "phase": "after_email"}})
     g.add_conditional_edges(
         "verifier",
         route_after_verifier,
-        {"email_writer": "email_writer", "approval_gate": "planner"},
+        {
+            "email_writer": "email_writer",
+            "approval_gate": "planner",
+            "autopilot_gate": "autopilot_gate",
+        },
     )
     g.add_edge("planner", END)
+    g.add_edge("autopilot_gate", END)
     app = g.compile(checkpointer=MemorySaver())
 
     state = {
         "campaign_id": "vloop",
+        # Explicit HITL path so this mini-graph exercises approval routing.
+        "input": {"autopilot": False},
         "seller": seller,
         "icp": {
             "industries": ["Software"],

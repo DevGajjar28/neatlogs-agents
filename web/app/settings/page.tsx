@@ -17,7 +17,7 @@ import {
   getSystemStatus,
   putSendingPaused,
 } from "@/lib/api";
-import { formatCredits, shortModelName } from "@/lib/format";
+import { formatCredits, friendlyModelName } from "@/lib/format";
 import { queryKeys } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 
@@ -105,48 +105,77 @@ export default function SettingsPage() {
 
         {q.data ? (
           <div className="rounded-[8px] border border-[var(--border)] bg-[var(--surface)] p-4">
-            <h2 className="mb-3 text-[14px] font-semibold leading-5">System</h2>
-            <dl className="grid grid-cols-1 gap-3 text-[13px] sm:grid-cols-2">
+            <h2 className="mb-1 text-[14px] font-semibold leading-5">Workspace status</h2>
+            <p className="mb-4 text-[12px] text-[var(--text-muted)]">
+              Plain-language view of data sources, sending, and the writing model — same summary
+              as the sidebar.
+            </p>
+            <dl className="grid grid-cols-1 gap-4 text-[13px] sm:grid-cols-2">
               <div>
-                <dt className="text-[12px] text-[var(--text-subtle)]">Data mode</dt>
-                <dd className="font-medium">{q.data.data_mode}</dd>
-              </div>
-              <div>
-                <dt className="text-[12px] text-[var(--text-subtle)]">Demo mode</dt>
-                <dd className="font-medium">{q.data.demo_mode ? "on" : "off"}</dd>
-              </div>
-              <div>
-                <dt className="text-[12px] text-[var(--text-subtle)]">Crustdata credits</dt>
-                <dd>
-                  <Mono>{formatCredits(extractCredits(q.data))}</Mono>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[12px] text-[var(--text-subtle)]">Credit cap</dt>
-                <dd>
-                  <Mono>{formatCredits(q.data.max_credits)}</Mono>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[12px] text-[var(--text-subtle)]">LLM</dt>
-                <dd>
-                  <Mono>
-                    {shortModelName(q.data.llm.fast || q.data.llm.strong)} (
-                    {q.data.llm.provider || "—"})
-                  </Mono>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[12px] text-[var(--text-subtle)]">neatlogs</dt>
+                <dt className="text-[12px] text-[var(--text-subtle)]">Company research</dt>
                 <dd className="font-medium">
-                  {q.data.neatlogs.configured ? "Tracing on" : "Tracing off"}
+                  {formatCredits(extractCredits(q.data))} credits left
+                  <span className="mt-0.5 block text-[12px] font-normal text-[var(--text-muted)]">
+                    Crustdata budget for finding companies and people (cap{" "}
+                    {formatCredits(q.data.max_credits)}).
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[12px] text-[var(--text-subtle)]">Backup email finder</dt>
+                <dd className="font-medium">
+                  {q.data.hunter?.configured ? "Hunter.io connected" : "Hunter.io not set up"}
+                  <span className="mt-0.5 block text-[12px] font-normal text-[var(--text-muted)]">
+                    {q.data.hunter?.configured
+                      ? "Used when primary data is thin or out of credits."
+                      : "Optional — add HUNTER_API_KEY to keep finding emails."}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[12px] text-[var(--text-subtle)]">Writing assistant</dt>
+                <dd className="font-medium">
+                  {friendlyModelName(q.data.llm.fast || q.data.llm.strong)}
+                  <span className="mt-0.5 block text-[12px] font-normal text-[var(--text-muted)]">
+                    Used for research summaries and email drafts
+                    {q.data.llm.provider ? ` · ${q.data.llm.provider}` : ""}.
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[12px] text-[var(--text-subtle)]">Research mode</dt>
+                <dd className="font-medium">
+                  {q.data.data_mode === "live" ? "Live research" : "Saved / replay data"}
+                  <span className="mt-0.5 block text-[12px] font-normal text-[var(--text-muted)]">
+                    {q.data.data_mode === "live"
+                      ? "Pulls fresh company and people data."
+                      : "Uses cached results without new data spend."}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[12px] text-[var(--text-subtle)]">Demo safety</dt>
+                <dd className="font-medium">
+                  {q.data.demo_mode ? "On" : "Off"}
+                  <span className="mt-0.5 block text-[12px] font-normal text-[var(--text-muted)]">
+                    When on, live prospect sends stay locked.
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[12px] text-[var(--text-subtle)]">Activity log</dt>
+                <dd className="font-medium">
+                  {q.data.neatlogs.configured ? "Recording" : "Off"}
+                  <span className="mt-0.5 block text-[12px] font-normal text-[var(--text-muted)]">
+                    neatlogs traces of what agents did on each run.
+                  </span>
                 </dd>
               </div>
               <div>
                 <dt className="text-[12px] text-[var(--text-subtle)]">Mail accounts</dt>
                 <dd className="font-medium">
-                  {q.data.mail_account_count ?? 0}
-                  {q.data.mail_account_error ? " · error" : ""}
+                  {q.data.mail_account_count ?? 0} connected
+                  {q.data.mail_account_error ? " · needs attention" : ""}
                 </dd>
               </div>
             </dl>

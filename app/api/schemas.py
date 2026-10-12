@@ -370,6 +370,7 @@ class SystemStatusOut(BaseModel):
     max_credits: int
     llm: dict[str, str]
     neatlogs: dict[str, Any]
+    hunter: dict[str, Any] = {"configured": False}
     max_send_mode: str = "sandbox"
     sending_paused: bool = False
     mail_account_count: int = 0

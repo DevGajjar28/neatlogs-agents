@@ -68,9 +68,9 @@ def test_add_manual_contact_writes_drafts(db, monkeypatch):
             VALUES (
               'c-add',
               '2026-01-01T00:00:00+00:00',
-              '{"target_mode":"provided","template_snapshot":"# Voice\\nDirect."}',
+              '{"target_mode":"provided","template_snapshot":"# Voice\\nDirect.","autopilot":false}',
               'completed',
-              '{"target_mode":"provided","template_snapshot":"# Voice\\nDirect."}'
+              '{"target_mode":"provided","template_snapshot":"# Voice\\nDirect.","autopilot":false}'
             )
             """
         )

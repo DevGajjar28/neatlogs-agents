@@ -67,7 +67,9 @@ class Contact(BaseModel):
     title: str
     role_kind: Literal["economic_buyer", "champion", "user"]
     email: str | None
-    email_source: Literal["crustdata", "crustdata_realtime", "pattern_guess", "user", "none"]
+    email_source: Literal[
+        "crustdata", "crustdata_realtime", "hunter", "pattern_guess", "user", "none"
+    ]
     email_confidence: Literal["verified", "likely", "guessed", "none"]
     profile_url: str | None
 

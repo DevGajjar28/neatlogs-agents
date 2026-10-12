@@ -116,6 +116,25 @@ def classify_deterministic(
         if phrase in body_l or phrase in subj:
             # "not interested" → opt_out when in doubt
             return "opt_out"
+    # Explicit date/time in the reply → treat as confirmed booking request.
+    try:
+        from app.calendar.events import parse_meeting_time_from_text
+
+        if parse_meeting_time_from_text(f"{subj}\n{body}"):
+            if any(
+                p in body_l or p in subj
+                for p in (
+                    *MEETING_PHRASES,
+                    *MEETING_CONFIRM_PHRASES,
+                    "interested",
+                    "meet",
+                    "call",
+                    "available",
+                )
+            ):
+                return "meeting_confirmed"
+    except Exception:  # noqa: BLE001
+        pass
     for phrase in MEETING_CONFIRM_PHRASES:
         if phrase in body_l or phrase in subj:
             return "meeting_confirmed"

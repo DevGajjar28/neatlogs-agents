@@ -103,6 +103,10 @@ export type SystemStatus = {
     endpoint?: string;
     [k: string]: unknown;
   };
+  hunter?: {
+    configured?: boolean;
+    [k: string]: unknown;
+  };
   max_send_mode?: string;
   sending_paused?: boolean;
   mail_account_count?: number;

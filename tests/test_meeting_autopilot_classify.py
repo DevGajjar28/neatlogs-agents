@@ -6,6 +6,13 @@ def test_meeting_confirmed_yes_that_works():
     assert label == "meeting_confirmed"
 
 
+def test_meeting_confirmed_when_prospect_names_datetime():
+    label = classify_deterministic(
+        body="Hi Dev, I am interested let's have a meet at wednesday 14th october, at 11:00am."
+    )
+    assert label == "meeting_confirmed"
+
+
 def test_parse_meeting_time_tuesday_13th():
     from app.calendar.events import parse_meeting_time_from_text
     from datetime import datetime, timezone
