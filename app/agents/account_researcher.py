@@ -325,7 +325,7 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
         extras = extras_in
         extras["crustdata_exhausted"] = crustdata_exhausted
         extras["skip_people_search"] = True
-        return {
+        out_state = {
             "accounts": accounts,
             "contacts": contacts,
             "companies": [c.model_dump(mode="json") for c in companies],
@@ -336,6 +336,14 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
             "account_shards": Overwrite([]),
             "plan": set_plan_phase(state, "after_account"),
         }
+        # Live Leads UI: persist seed contacts as soon as the list is bound.
+        try:
+            from app.persist import persist_contacts_as_leads
+
+            persist_contacts_as_leads({**state, **out_state, "campaign_id": campaign_id})
+        except Exception:  # noqa: BLE001
+            pass
+        return out_state
 
     try:
         urls = [u for _, u, _ in pending_urls][:25]

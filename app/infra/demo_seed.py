@@ -43,6 +43,23 @@ def demo_seed_enabled() -> bool:
     return bool(get_settings().demo_seed)
 
 
+def is_seed_campaign(state_or_opts: dict[str, Any] | None) -> bool:
+    """True when this campaign was started from a demo seed snapshot."""
+    if not isinstance(state_or_opts, dict):
+        return False
+    extras = state_or_opts.get("extras") if isinstance(state_or_opts.get("extras"), dict) else {}
+    inp = state_or_opts.get("input") if isinstance(state_or_opts.get("input"), dict) else {}
+    if extras.get("seed") or inp.get("seed"):
+        return True
+    tm = str(
+        extras.get("target_mode")
+        or inp.get("target_mode")
+        or state_or_opts.get("target_mode")
+        or ""
+    )
+    return tm == "provided_contacts"
+
+
 def contacts_csv_path(name: str = SEED_NAME) -> Path:
     return DEMO_DIR / f"{name}_contacts.csv"
 
@@ -305,7 +322,8 @@ def match_and_apply(
             for c in companies
             if c.get("domain")
         ],
-        "n": max(len(companies), 1),
+        # Target = contacts (demo shows live lead generation for every person).
+        "n": max(len(contacts), 1),
         "send_mode": "gmail_test",
         "seed_test_inboxes": list(snap.get("test_inboxes") or []),
         "seller_fallback": snap.get("seller") or {},

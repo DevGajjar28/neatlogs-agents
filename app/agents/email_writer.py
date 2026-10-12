@@ -132,6 +132,10 @@ def email_writer_node(state: dict[str, Any]) -> dict[str, Any]:
     drafts: dict[str, list[dict]] = dict(existing)
     template_snapshot = _template_snapshot_from_state(state)
 
+    from app.agents.evidence import make_evidence
+    from app.infra.demo_seed import is_seed_campaign
+
+    seed_mode = is_seed_campaign(state)
     llm = get_llm("fast")
     for contact in contacts:
         # Skip contacts already passed verification.
@@ -143,8 +147,26 @@ def email_writer_node(state: dict[str, Any]) -> dict[str, Any]:
 
         account_raw = accounts.get(contact.company_id)
         if not account_raw:
-            continue
-        account = AccountBrief.model_validate(account_raw)
+            if not seed_mode:
+                continue
+            # Seed list: still draft even when company enrich was thin / missing.
+            company_name = (companies.get(contact.company_id) or {}).get("name") or contact.company_id
+            domain = (companies.get(contact.company_id) or {}).get("domain") or ""
+            thin_ev = make_evidence(
+                f"{company_name} is on the preloaded outreach list"
+                + (f" ({domain})" if domain else ""),
+                source_type="user_input",
+                source_ref="demo_seed:provided_contacts",
+                confidence="medium",
+            )
+            account = AccountBrief(
+                company_id=contact.company_id,
+                story=f"{company_name} is a preloaded demo prospect [{thin_ev.id}].",
+                why_now=[f"On the MindArmor demo list [{thin_ev.id}]"],
+                evidence=[thin_ev],
+            )
+        else:
+            account = AccountBrief.model_validate(account_raw)
         role = roles.get(contact.role_kind) or roles.get("economic_buyer")
         tone = _tone_for_role(role)
         evidence_cards = list(account.evidence) + list(seller.evidence[:5])

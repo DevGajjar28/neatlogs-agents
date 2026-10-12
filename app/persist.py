@@ -65,26 +65,38 @@ def persist_v0_run(state: dict[str, Any]) -> None:
                     (lead_id, campaign_id, cid, None, "no_contact", now),
                 )
 
-        for contact_id, sequence in drafts.items():
-            contact = contacts.get(contact_id) or {}
+        # Every contact becomes a lead row (seed demos need the list visible live).
+        for contact_id, contact in contacts.items():
             lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{campaign_id}:{contact_id}"))
+            sequence = drafts.get(contact_id) or []
+            lead_status = "drafted" if sequence else "contact_found"
             conn.execute(
                 """
                 INSERT INTO leads (id, campaign_id, company_id, contact_id, status, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at,
-                    contact_id = excluded.contact_id
+                ON CONFLICT(id) DO UPDATE SET
+                    status = CASE
+                        WHEN leads.status IN ('approved', 'sent') THEN leads.status
+                        WHEN excluded.status = 'drafted' THEN 'drafted'
+                        WHEN leads.status = 'drafted' THEN leads.status
+                        ELSE excluded.status
+                    END,
+                    updated_at = excluded.updated_at,
+                    contact_id = excluded.contact_id,
+                    company_id = excluded.company_id
                 """,
                 (
                     lead_id,
                     campaign_id,
                     contact.get("company_id"),
                     contact_id,
-                    "drafted",
+                    lead_status,
                     now,
                 ),
             )
             for draft in sequence:
+                if not isinstance(draft, dict):
+                    continue
                 email_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{lead_id}:{draft.get('step')}"))
                 idem = f"{lead_id}:{draft.get('step')}"
                 conn.execute(
@@ -106,3 +118,46 @@ def persist_v0_run(state: dict[str, Any]) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def persist_contacts_as_leads(state: dict[str, Any]) -> int:
+    """Upsert lead rows for contacts as soon as they exist (live Leads UI)."""
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    now = datetime.now(timezone.utc).isoformat()
+    campaign_id = state["campaign_id"]
+    contacts = [c for c in (state.get("contacts") or []) if isinstance(c, dict) and c.get("id")]
+    n = 0
+    try:
+        for contact in contacts:
+            contact_id = str(contact["id"])
+            lead_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{campaign_id}:{contact_id}"))
+            conn.execute(
+                """
+                INSERT INTO leads (id, campaign_id, company_id, contact_id, status, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    company_id = excluded.company_id,
+                    contact_id = excluded.contact_id,
+                    updated_at = excluded.updated_at,
+                    status = CASE
+                        WHEN leads.status IN ('drafted', 'approved', 'sent', 'awaiting_approval')
+                            THEN leads.status
+                        ELSE excluded.status
+                    END
+                """,
+                (
+                    lead_id,
+                    campaign_id,
+                    contact.get("company_id"),
+                    contact_id,
+                    "contact_found",
+                    now,
+                ),
+            )
+            n += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return n

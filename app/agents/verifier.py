@@ -32,6 +32,8 @@ class _JudgeOut(BaseModel):
 
 def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
     """Verify all drafts; set route hint in plan.next_verify for graph edges."""
+    from app.infra.demo_seed import is_seed_campaign
+
     seller = SellerBrief.model_validate(state["seller"]) if state.get("seller") else None
     contacts = {c["id"]: Contact.model_validate(c) for c in (state.get("contacts") or []) if isinstance(c, dict)}
     accounts = state.get("accounts") or {}
@@ -42,6 +44,7 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
     extras = dict(state.get("extras") or {})
     attempts = dict(extras.get("verify_attempts") or {})
     notes = dict(extras.get("redraft_notes") or {})
+    seed_mode = is_seed_campaign(state)
 
     any_redraft = False
     all_terminal = True
@@ -54,6 +57,34 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
         if prior.get("action") == "pass" and prior.get("passed"):
             continue
 
+        step1 = EmailDraft.model_validate(sequence[0])
+        # Demo seed: generate for everyone — only block leaked internal refs.
+        if seed_mode:
+            if find_refs(f"{step1.subject}\n{step1.body}"):
+                cleaned = strip_refs(step1.subject), strip_refs(step1.body)
+                step1.subject, step1.body = cleaned[0], cleaned[1]
+                sequence[0] = step1.model_dump(mode="json")
+                drafts[contact_id] = sequence
+            result = VerifierResult(
+                passed=True,
+                action="pass",
+                issues=[],
+                unsupported_claims=[],
+                stale_evidence_ids=[],
+            )
+            verifier[contact_id] = result.model_dump(mode="json")
+            events.append(
+                {
+                    "type": "verify.pass",
+                    "contact_id": contact_id,
+                    "contact": contact.name,
+                    "attempt": 0,
+                    "seed_soft_pass": True,
+                }
+            )
+            notes.pop(contact_id, None)
+            continue
+
         account_raw = accounts.get(contact.company_id) or {}
         try:
             account = AccountBrief.model_validate(account_raw)
@@ -63,7 +94,6 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
         if seller:
             evidence.extend(seller.evidence[:5])
 
-        step1 = EmailDraft.model_validate(sequence[0])
         attempt = int(attempts.get(contact_id, 0))
         result = verify_draft(
             step1,

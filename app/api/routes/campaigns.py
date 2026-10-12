@@ -108,6 +108,21 @@ def _summary(row: Any) -> CampaignSummary:
     target_mode = str(opts.get("target_mode") or inp.get("target_mode") or "discover")
     if target_mode not in {"discover", "provided", "provided_contacts"}:
         target_mode = "discover"
+    # Mid-run seed: checkpoint contacts may exist before DB lead rows.
+    leads_found = int(leads or 0)
+    if target_mode == "provided_contacts" or opts.get("seed"):
+        try:
+            ck_contacts = state_reader.contacts(cid) or []
+            leads_found = max(leads_found, len([c for c in ck_contacts if isinstance(c, dict)]))
+        except Exception:  # noqa: BLE001
+            pass
+        snap_n = len(opts.get("provided_contacts") or [])
+        if snap_n:
+            leads_target_default = snap_n
+        else:
+            leads_target_default = int(opts.get("n") or inp.get("n") or 10)
+    else:
+        leads_target_default = int(opts.get("n") or inp.get("n") or 10)
     return CampaignSummary(
         id=cid,
         seller_name=row["seller_name"] or inp.get("company_name") or "",
@@ -115,8 +130,8 @@ def _summary(row: Any) -> CampaignSummary:
         status=status,
         current_stage=row["current_stage"],
         stages=_stages(cid),
-        leads_found=int(leads or 0),
-        leads_target=int(opts.get("n") or inp.get("n") or 10),
+        leads_found=leads_found,
+        leads_target=leads_target_default,
         credits_spent=spent,
         credit_cap=float(opts.get("cap") or settings.max_credits),
         mode=opts.get("mode") or inp.get("mode") or settings.data_mode,  # type: ignore[arg-type]
@@ -198,7 +213,7 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
     elif target_mode == "provided_contacts":
         if not provided_contacts:
             raise HTTPException(422, detail="No preloaded contacts for this seller")
-        n = max(len(provided) or len({c.get("company") for c in provided_contacts}), 1)
+        n = max(len(provided_contacts), 1)
     elif n < 5:
         raise HTTPException(422, detail="n must be between 5 and 50 for discover mode")
 
@@ -1110,47 +1125,50 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
                 **seq,
             )
         )
-    # Surface contacts not yet persisted as leads
-    if not out:
-        for cid, contact in contacts.items():
-            company_id = str(contact.get("company_id") or "")
-            company = companies.get(company_id) or {}
-            account = accounts.get(company_id) or {}
-            ev_by_id = {
-                e["id"]: e
-                for e in (account.get("evidence") or [])
-                if isinstance(e, dict) and e.get("id")
-            }
-            seq = _sequence_fields(
-                cid,
-                None,
-                drafts_by_contact,
-                emails_by_lead,
-                evidence_by_id=ev_by_id,
-                contact_name=str(contact.get("name") or ""),
-                company_name=str(company.get("name") or ""),
-                role=str(contact.get("title") or ""),
-                seller_name=seller_name,
+    # Surface contacts from checkpoint that are not yet in the leads table
+    # (seed demos + mid-run: Leads must show live as contacts appear).
+    seen_contact_ids = {str(r.contact_id) for r in out if r.contact_id}
+    for cid, contact in contacts.items():
+        if str(cid) in seen_contact_ids:
+            continue
+        company_id = str(contact.get("company_id") or "")
+        company = companies.get(company_id) or {}
+        account = accounts.get(company_id) or {}
+        ev_by_id = {
+            e["id"]: e
+            for e in (account.get("evidence") or [])
+            if isinstance(e, dict) and e.get("id")
+        }
+        seq = _sequence_fields(
+            cid,
+            None,
+            drafts_by_contact,
+            emails_by_lead,
+            evidence_by_id=ev_by_id,
+            contact_name=str(contact.get("name") or ""),
+            company_name=str(company.get("name") or ""),
+            role=str(contact.get("title") or ""),
+            seller_name=seller_name,
+        )
+        if company_id:
+            seen_companies.add(company_id)
+        out.append(
+            LeadRow(
+                lead_id=cid,
+                company_id=company_id or None,
+                company_name=company.get("name") or "",
+                company_domain=company.get("domain") or "",
+                contact_name=contact.get("name"),
+                contact_title=contact.get("title"),
+                role_kind=contact.get("role_kind"),
+                email_masked=mask_email(contact["email"]) if contact.get("email") else None,
+                email_confidence=contact.get("email_confidence") or "none",  # type: ignore[arg-type]
+                fit=int(round(float(company.get("fit_score") or 0) * 100)),
+                status="discovered",
+                contact_id=cid,
+                **seq,
             )
-            if company_id:
-                seen_companies.add(company_id)
-            out.append(
-                LeadRow(
-                    lead_id=cid,
-                    company_id=company_id or None,
-                    company_name=company.get("name") or "",
-                    company_domain=company.get("domain") or "",
-                    contact_name=contact.get("name"),
-                    contact_title=contact.get("title"),
-                    role_kind=contact.get("role_kind"),
-                    email_masked=mask_email(contact["email"]) if contact.get("email") else None,
-                    email_confidence=contact.get("email_confidence") or "none",  # type: ignore[arg-type]
-                    fit=int(round(float(company.get("fit_score") or 0) * 100)),
-                    status="discovered",
-                    contact_id=cid,
-                    **seq,
-                )
-            )
+        )
     # Companies researched with no person/email (checkpoint may precede DB persist)
     contact_companies = {
         str(c.get("company_id")) for c in contacts.values() if c.get("company_id")
