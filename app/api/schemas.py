@@ -359,6 +359,13 @@ class EmailBulkIn(BaseModel):
     action: Literal["approve", "reject"] = "approve"
 
 
+class CampaignApproveIn(BaseModel):
+    """One click for the whole campaign: approve/reject every pending draft."""
+
+    action: Literal["approve", "reject"] = "approve"
+    include_guessed: bool = False
+
+
 class HealthOut(BaseModel):
     ok: bool = True
 

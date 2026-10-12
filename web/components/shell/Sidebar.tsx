@@ -61,13 +61,16 @@ export function Sidebar() {
   });
 
   const pendingCount = useMemo(() => {
-    return pendingQueries.reduce((sum, q) => sum + (q.data?.items?.length || 0), 0);
+    return pendingQueries.reduce(
+      (sum, q) => sum + (q.data?.waiting && (q.data.items?.length || 0) > 0 ? 1 : 0),
+      0,
+    );
   }, [pendingQueries]);
 
   useEffect(() => {
     if (prevCount.current !== null && pendingCount > prevCount.current) {
       toast.message("Approval needed", {
-        description: `${pendingCount} draft${pendingCount === 1 ? "" : "s"} waiting`,
+        description: `${pendingCount} campaign${pendingCount === 1 ? "" : "s"} ready to approve & send`,
       });
     }
     prevCount.current = pendingCount;

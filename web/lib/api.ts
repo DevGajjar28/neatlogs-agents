@@ -804,6 +804,27 @@ export function sendApproved(campaignId: string) {
   );
 }
 
+/** One permission for the campaign — approve/reject every pending draft and send. */
+export function approveCampaign(
+  campaignId: string,
+  body: { action: "approve" | "reject"; include_guessed?: boolean } = {
+    action: "approve",
+  },
+) {
+  return api<{
+    decision_id: number | null;
+    pid: number | null;
+    action: string;
+    drafts: number;
+    sent?: number;
+    skipped_guessed?: number;
+    inline?: boolean;
+  }>(`/campaigns/${encodeURIComponent(campaignId)}/approve-campaign`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export function patchLeadSequence(
   leadId: string,
   steps: { step: 1 | 2 | 3; subject?: string; body?: string }[],

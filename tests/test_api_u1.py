@@ -261,6 +261,53 @@ def test_emit_and_set_stage_write_rows(api_env):
         conn.close()
 
 
+def test_approve_campaign_uses_approve_all(api_env):
+    client, db = api_env
+    _seed_campaign(db, status="waiting_approval")
+    interrupt = {
+        "type": "email_approval",
+        "items": [
+            {
+                "contact_id": "c1",
+                "lead_id": "l1",
+                "email_confidence": "likely",
+                "draft": {"subject": "Hi", "body": "Hello"},
+            },
+            {
+                "contact_id": "c2",
+                "lead_id": "l2",
+                "email_confidence": "guessed",
+                "draft": {"subject": "Hi", "body": "Hello"},
+            },
+        ],
+    }
+    with patch(
+        "app.api.routes.campaigns.state_reader.pending_interrupt",
+        return_value=interrupt,
+    ):
+        with patch("app.api.routes.campaigns.state_reader.drafts", return_value={}):
+            with patch("app.api.runs.approve_decision", return_value=9) as approve:
+                with patch("app.api.state_reader.invalidate"):
+                    r = client.post(
+                        "/api/campaigns/u1-seed/approve-campaign",
+                        json={"action": "approve", "include_guessed": False},
+                    )
+    assert r.status_code == 200
+    assert r.json()["drafts"] == 2
+    approve.assert_called_once()
+    conn = connect(db)
+    try:
+        gate = conn.execute(
+            "SELECT decision_json FROM gate_decisions WHERE id = ?",
+            (r.json()["decision_id"],),
+        ).fetchone()
+        decision = json.loads(gate["decision_json"])
+        assert decision["approve_all"] is True
+        assert decision["include_guessed"] is False
+    finally:
+        conn.close()
+
+
 def test_bulk_approve_skips_guessed(api_env):
     client, db = api_env
     _seed_campaign(db, status="waiting_approval")

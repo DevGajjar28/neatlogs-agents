@@ -48,7 +48,11 @@ export default function DashboardPage() {
   });
 
   const pendingCount = useMemo(
-    () => pendingQueries.reduce((sum, q) => sum + (q.data?.items?.length || 0), 0),
+    () =>
+      pendingQueries.reduce(
+        (sum, q) => sum + (q.data?.waiting && (q.data.items?.length || 0) > 0 ? 1 : 0),
+        0,
+      ),
     [pendingQueries],
   );
 

@@ -62,7 +62,7 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
         "type": "email_approval",
         "campaign_id": campaign_id,
         "items": items,
-        "message": "Approve, edit, or reject verified drafts before send.",
+        "message": "Approve this campaign once to send every verified draft.",
     }
     from app.infra.events import set_stage
 

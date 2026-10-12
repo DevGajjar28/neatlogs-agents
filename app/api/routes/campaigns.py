@@ -16,6 +16,7 @@ from app.api import state_reader
 from app.api.pipeline import campaign_pipeline
 from app.api.schemas import (
     BudgetOut,
+    CampaignApproveIn,
     CampaignDetail,
     CampaignSummary,
     CompanyResearchOut,
@@ -1783,6 +1784,217 @@ def email_decision(
         body=body.body,
         allow_guessed=bool(body.confirm_guessed),
     )
+
+
+@router.post("/campaigns/{campaign_id}/approve-campaign")
+def approve_campaign(campaign_id: str, body: CampaignApproveIn) -> dict[str, Any]:
+    """One permission for the campaign: approve/reject every pending draft, then send."""
+    from app.agents.evidence_refs import find_refs
+    from app.agents.sender import sender_node
+    from app.infra.events import set_stage
+
+    payload_interrupt = state_reader.pending_interrupt(campaign_id)
+    has_interrupt = bool(
+        payload_interrupt and payload_interrupt.get("type") == "email_approval"
+    )
+    payload = payload_interrupt if has_interrupt else _build_email_approval_payload(campaign_id)
+    items = [i for i in ((payload or {}).get("items") or []) if isinstance(i, dict)]
+    if not items:
+        raise HTTPException(404, detail="No drafts waiting for approval")
+
+    drafts_all = state_reader.drafts(campaign_id)
+    blocked_refs: list[str] = []
+    for item in items:
+        cid = str(item.get("contact_id") or "")
+        seq = drafts_all.get(cid) or []
+        draft = seq[0] if seq and isinstance(seq[0], dict) else (item.get("draft") or {})
+        text = f"{draft.get('subject') or ''}\n{draft.get('body') or ''}"
+        if find_refs(text):
+            blocked_refs.append(cid)
+
+    if body.action == "approve" and blocked_refs:
+        raise HTTPException(
+            422,
+            detail=(
+                f"{len(blocked_refs)} draft(s) still have internal reference ids. "
+                "Fix them on the campaign before approving."
+            ),
+        )
+
+    # Live graph interrupt: one resume decision for the whole queue
+    if has_interrupt:
+        if body.action == "approve":
+            decision: dict[str, Any] = {
+                "approve_all": True,
+                "include_guessed": bool(body.include_guessed),
+                "actor": "api",
+            }
+        else:
+            decision = {
+                "approvals": {
+                    str(i.get("contact_id")): {"approved": False}
+                    for i in items
+                    if i.get("contact_id")
+                },
+                "actor": "api",
+            }
+        settings = get_settings()
+        init_db(settings.db_path)
+        conn = connect(settings.db_path)
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO gate_decisions (campaign_id, gate, decision_json, status, created_at)
+                VALUES (?, 'send', ?, 'pending', ?)
+                """,
+                (campaign_id, json.dumps(decision), datetime.now(timezone.utc).isoformat()),
+            )
+            decision_id = cur.lastrowid
+            conn.commit()
+        finally:
+            conn.close()
+        try:
+            pid = run_manager.approve_decision(campaign_id, int(decision_id))
+        except RuntimeError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        state_reader.invalidate(campaign_id)
+        return {
+            "decision_id": decision_id,
+            "pid": pid,
+            "action": body.action,
+            "drafts": len(items),
+            "inline": False,
+        }
+
+    # Post-run / manual path: stage all decisions and send inline
+    approvals: dict[str, Any] = {}
+    skipped_guessed = 0
+    for item in items:
+        cid = str(item.get("contact_id") or "")
+        if not cid:
+            continue
+        guessed = item.get("email_confidence") == "guessed"
+        if body.action == "reject":
+            approvals[cid] = {"approved": False}
+            _stage_email_decision(
+                campaign_id, cid, action="reject", subject=None, body=None, allow_guessed=False
+            )
+            continue
+        if guessed and not body.include_guessed:
+            approvals[cid] = {"approved": False}
+            skipped_guessed += 1
+            continue
+        approvals[cid] = {
+            "approved": True,
+            "allow_guessed": bool(guessed and body.include_guessed),
+        }
+        _stage_email_decision(
+            campaign_id,
+            cid,
+            action="approve",
+            subject=None,
+            body=None,
+            allow_guessed=bool(guessed and body.include_guessed),
+        )
+
+    if body.action == "reject":
+        values = state_reader.get_values(campaign_id)
+        extras = dict(values.get("extras") or {})
+        extras["email_approvals"] = approvals
+        extras.pop("pending_email_approval", None)
+        state_reader.update_values(
+            campaign_id,
+            {
+                "extras": extras,
+                "plan": {**dict(values.get("plan") or {}), "phase": "after_approval"},
+            },
+        )
+        set_stage(campaign_id, "approval", "done")
+        set_stage(campaign_id, "send", "skipped", "rejected")
+        state_reader.invalidate(campaign_id)
+        return {
+            "decision_id": None,
+            "pid": None,
+            "action": "reject",
+            "drafts": len(items),
+            "sent": 0,
+            "skipped_guessed": 0,
+            "inline": True,
+        }
+
+    if not any(a.get("approved") for a in approvals.values()):
+        raise HTTPException(
+            422,
+            detail="No drafts to send — all were guessed addresses (enable include_guessed) or empty",
+        )
+
+    values = state_reader.get_values(campaign_id)
+    drafts = dict(values.get("drafts") or {})
+    extras = dict(values.get("extras") or {})
+    extras["email_approvals"] = approvals
+    extras.pop("pending_email_approval", None)
+    state = {
+        **values,
+        "campaign_id": campaign_id,
+        "drafts": drafts,
+        "extras": extras,
+        "events": list(values.get("events") or []),
+        "errors": list(values.get("errors") or []),
+    }
+    set_stage(campaign_id, "approval", "done")
+    set_stage(campaign_id, "send", "running")
+    out = sender_node(state)
+    sent_n = sum(
+        1
+        for e in (out.get("events") or [])
+        if isinstance(e, dict) and e.get("type") == "send.step1"
+    )
+    merged_extras = dict(out.get("extras") or extras)
+    merged_extras["email_approvals"] = approvals
+    merged_extras.pop("pending_email_approval", None)
+    state_reader.update_values(
+        campaign_id,
+        {
+            "drafts": out.get("drafts") or drafts,
+            "extras": merged_extras,
+            "events": out.get("events") or state["events"],
+            "errors": out.get("errors") or state["errors"],
+            "plan": out.get("plan") or {"phase": "after_email"},
+        },
+    )
+    set_stage(campaign_id, "send", "done", f"{sent_n} sent")
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        for item in items:
+            cid = str(item.get("contact_id") or "")
+            if not approvals.get(cid, {}).get("approved"):
+                continue
+            lead_id = item.get("lead_id")
+            if lead_id:
+                conn.execute(
+                    "UPDATE leads SET status = ?, updated_at = ? WHERE id = ?",
+                    ("sent" if sent_n else "approved", now, str(lead_id)),
+                )
+        conn.execute(
+            "UPDATE campaigns SET status = ? WHERE id = ?",
+            ("completed", campaign_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    state_reader.invalidate(campaign_id)
+    return {
+        "decision_id": None,
+        "pid": None,
+        "action": "approve",
+        "drafts": len(items),
+        "sent": sent_n,
+        "skipped_guessed": skipped_guessed,
+        "inline": True,
+    }
 
 
 @router.post("/campaigns/{campaign_id}/send-approved")

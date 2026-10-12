@@ -1,30 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/common/EmptyState";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
-import { Mono } from "@/components/common/Mono";
 import { CardSkeleton } from "@/components/common/Skeletons";
 import { PageTitle } from "@/components/shell/page-title";
 import { useShell } from "@/components/shell/shell-context";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   ApiError,
-  decideEmail,
+  approveCampaign,
   getPendingApprovals,
   listCampaigns,
-  sendApproved,
   type PendingApprovalItem,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/keys";
-
-const EV_RE = /\bev_[0-9a-f]{6,}\b/i;
 
 /** Campaigns that may still have drafts waiting even if status briefly lags. */
 const APPROVAL_STATUSES = new Set([
@@ -34,9 +28,10 @@ const APPROVAL_STATUSES = new Set([
   "paused",
 ]);
 
-type DraftCard = PendingApprovalItem & {
+type CampaignQueue = {
   campaignId: string;
   sellerName: string;
+  items: PendingApprovalItem[];
 };
 
 export default function ApprovalsPage() {
@@ -62,24 +57,24 @@ export default function ApprovalsPage() {
     })),
   });
 
-  const cards: DraftCard[] = useMemo(() => {
-    const out: DraftCard[] = [];
+  const queues: CampaignQueue[] = useMemo(() => {
+    const out: CampaignQueue[] = [];
     pendingQueries.forEach((q, i) => {
       const campaign = candidates[i];
-      if (!campaign || !q.data?.waiting) return;
-      for (const item of q.data.items) {
-        out.push({
-          ...item,
-          campaignId: campaign.id,
-          sellerName: campaign.seller_name,
-        });
-      }
+      if (!campaign || !q.data?.waiting || !q.data.items?.length) return;
+      out.push({
+        campaignId: campaign.id,
+        sellerName: campaign.seller_name,
+        items: q.data.items,
+      });
     });
     return out;
   }, [pendingQueries, candidates]);
 
   const loading =
     campaignsQ.isLoading || pendingQueries.some((q) => q.isLoading && !q.data);
+
+  const totalDrafts = queues.reduce((n, q) => n + q.items.length, 0);
 
   return (
     <>
@@ -96,30 +91,31 @@ export default function ApprovalsPage() {
           onAction={() => campaignsQ.refetch()}
         />
       ) : null}
-      {!loading && cards.length === 0 ? (
+      {!loading && queues.length === 0 ? (
         <EmptyState
           title="Nothing waiting for you"
-          description="When verified drafts need a human OK, they'll show up here — one row per email, with the campaign name."
+          description="When a campaign has verified drafts ready, you'll approve once for that campaign — then every lead gets sent and reply handling stays on autopilot."
           actionLabel="New campaign"
           onAction={() => setNewCampaignOpen(true)}
         />
       ) : null}
-      {cards.length > 0 ? (
+      {queues.length > 0 ? (
         <div className="space-y-3">
           <p className="text-[13px] text-[var(--text-muted)]">
-            {cards.length} email{cards.length === 1 ? "" : "s"} waiting — campaign · contact ·
-            draft. Open the campaign name for the full pipeline.
+            {queues.length} campaign{queues.length === 1 ? "" : "s"} · {totalDrafts}{" "}
+            email{totalDrafts === 1 ? "" : "s"} ready. One approve sends every draft for
+            that campaign.
           </p>
           <div className="overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface)]">
-            {cards.map((card, i) => (
-              <ApprovalRow
-                key={`${card.campaignId}:${card.contact_id}`}
-                card={card}
+            {queues.map((queue, i) => (
+              <CampaignApprovalRow
+                key={queue.campaignId}
+                queue={queue}
                 borderTop={i > 0}
                 onDone={() => {
                   void qc.invalidateQueries({ queryKey: queryKeys.campaigns });
                   void qc.invalidateQueries({
-                    queryKey: queryKeys.pendingApprovals(card.campaignId),
+                    queryKey: queryKeys.pendingApprovals(queue.campaignId),
                   });
                   void qc.invalidateQueries({ queryKey: queryKeys.approvalsInbox });
                 }}
@@ -132,48 +128,44 @@ export default function ApprovalsPage() {
   );
 }
 
-function ApprovalRow({
-  card,
+function CampaignApprovalRow({
+  queue,
   borderTop,
   onDone,
 }: {
-  card: DraftCard;
+  queue: CampaignQueue;
   borderTop: boolean;
   onDone: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [subject, setSubject] = useState(card.subject || "");
-  const [body, setBody] = useState(card.body || "");
-  const [confirmGuessed, setConfirmGuessed] = useState(false);
+  const [includeGuessed, setIncludeGuessed] = useState(false);
+  const [showList, setShowList] = useState(false);
 
-  useEffect(() => {
-    setSubject(card.subject || "");
-    setBody(card.body || "");
-  }, [card.subject, card.body]);
-
-  const hasRefs =
-    Boolean(card.has_internal_refs) || EV_RE.test(`${subject}\n${body}`);
-  const preview = (card.body || "").replace(/\s+/g, " ").trim().slice(0, 100);
+  const guessedCount = queue.items.filter((i) => i.guessed).length;
+  const refsBlocked = queue.items.filter((i) => i.has_internal_refs).length;
+  const previewNames = queue.items
+    .slice(0, 4)
+    .map((i) => i.name || i.email_masked || "Lead")
+    .join(", ");
+  const more =
+    queue.items.length > 4 ? ` +${queue.items.length - 4} more` : "";
 
   const mut = useMutation({
-    mutationFn: async (action: "approve" | "reject") => {
-      if (action === "approve" && hasRefs) {
-        throw new ApiError(
-          "This draft still has internal reference ids. Edit or regenerate it.",
-          422,
-          null,
-        );
-      }
-      await decideEmail(card.campaignId, card.contact_id, {
+    mutationFn: (action: "approve" | "reject") =>
+      approveCampaign(queue.campaignId, {
         action,
-        subject: action === "approve" ? subject : undefined,
-        body: action === "approve" ? body : undefined,
-        confirm_guessed: confirmGuessed,
-      });
-      await sendApproved(card.campaignId);
-    },
-    onSuccess: (_data, action) => {
-      toast.success(action === "approve" ? "Approved — sending" : "Rejected");
+        include_guessed: includeGuessed,
+      }),
+    onSuccess: (data, action) => {
+      if (action === "approve") {
+        const skipped = data.skipped_guessed || 0;
+        toast.success(
+          skipped
+            ? `Approved — sending ${data.drafts - skipped} of ${data.drafts} (skipped guessed)`
+            : `Approved — sending ${data.drafts} email${data.drafts === 1 ? "" : "s"}`,
+        );
+      } else {
+        toast.success("Campaign drafts rejected");
+      }
       onDone();
     },
     onError: (err) => {
@@ -185,55 +177,49 @@ function ApprovalRow({
     <div className={borderTop ? "border-t border-[var(--border)]" : undefined}>
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
         <Link
-          href={`/campaigns/${card.campaignId}`}
+          href={`/campaigns/${queue.campaignId}`}
           className="min-w-[7rem] shrink-0 text-[13px] font-semibold text-[var(--accent)] hover:underline"
           title="Open campaign"
         >
-          {card.sellerName || "Campaign"}
+          {queue.sellerName || "Campaign"}
         </Link>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-[var(--text)]">
-            {card.name || "Contact"}
-            {card.company_name ? (
-              <span className="font-normal text-[var(--text-muted)]">
+          <p className="text-[13px] font-medium text-[var(--text)]">
+            {queue.items.length} email{queue.items.length === 1 ? "" : "s"} ready to send
+          </p>
+          <p className="truncate text-[12px] text-[var(--text-muted)]">
+            {previewNames}
+            {more}
+            {guessedCount ? (
+              <span className="text-[var(--text-subtle)]">
                 {" "}
-                · {card.company_name}
+                · {guessedCount} guessed
+              </span>
+            ) : null}
+            {refsBlocked ? (
+              <span className="text-[var(--status-danger)]">
+                {" "}
+                · {refsBlocked} blocked (fix refs)
               </span>
             ) : null}
           </p>
-          <p className="truncate text-[12px] text-[var(--text-muted)]">
-            <Mono className="text-[11px]">{card.email_masked || "—"}</Mono>
-            {card.subject ? (
-              <span className="text-[var(--text-subtle)]"> · {card.subject}</span>
-            ) : null}
-            {preview ? (
-              <span className="text-[var(--text-subtle)]"> — {preview}</span>
-            ) : null}
-          </p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="outline"
             className="h-8"
-            onClick={() => setOpen((v) => !v)}
+            onClick={() => setShowList((v) => !v)}
           >
-            {open ? "Hide email" : "Review email"}
+            {showList ? "Hide leads" : "Leads"}
           </Button>
           <Button
             type="button"
             className="h-8"
-            disabled={mut.isPending || hasRefs || (card.guessed && !confirmGuessed && open)}
-            onClick={() => {
-              if (card.guessed && !confirmGuessed) {
-                setOpen(true);
-                toast.message("Confirm the guessed address before approving");
-                return;
-              }
-              mut.mutate("approve");
-            }}
+            disabled={mut.isPending || refsBlocked > 0}
+            onClick={() => mut.mutate("approve")}
           >
-            Accept & send
+            Approve & send all
           </Button>
           <Button
             type="button"
@@ -242,39 +228,40 @@ function ApprovalRow({
             disabled={mut.isPending}
             onClick={() => mut.mutate("reject")}
           >
-            Reject
+            Reject all
           </Button>
         </div>
       </div>
-      {open ? (
-        <div className="space-y-2 border-t border-[var(--border)] bg-[var(--surface-muted)]/40 px-4 py-3">
-          <Input
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            placeholder="Subject"
-            className="bg-[var(--surface)] text-[13px]"
+      {guessedCount > 0 ? (
+        <label className="flex items-center gap-2 border-t border-[var(--border)] px-4 py-2 text-[12px] text-[var(--text-muted)]">
+          <Checkbox
+            checked={includeGuessed}
+            onCheckedChange={(v) => setIncludeGuessed(Boolean(v))}
           />
-          <Textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={8}
-            className="bg-[var(--surface)] text-[13px]"
-          />
-          {hasRefs ? (
-            <p className="text-[12px] font-medium text-[var(--status-danger)]">
-              This draft still has internal reference ids. Edit them out before send.
-            </p>
-          ) : null}
-          {card.guessed ? (
-            <label className="flex items-center gap-2 text-[12px] text-[var(--text-muted)]">
-              <Checkbox
-                checked={confirmGuessed}
-                onCheckedChange={(v) => setConfirmGuessed(Boolean(v))}
-              />
-              I checked this guessed address
-            </label>
-          ) : null}
-        </div>
+          Also send {guessedCount} guessed address
+          {guessedCount === 1 ? "" : "es"}
+        </label>
+      ) : null}
+      {showList ? (
+        <ul className="space-y-1 border-t border-[var(--border)] bg-[var(--surface-muted)]/40 px-4 py-3 text-[12px]">
+          {queue.items.map((item) => (
+            <li
+              key={item.contact_id}
+              className="flex flex-wrap items-baseline gap-x-2 text-[var(--text-muted)]"
+            >
+              <span className="font-medium text-[var(--text)]">
+                {item.name || "Contact"}
+              </span>
+              {item.company_name ? <span>· {item.company_name}</span> : null}
+              <span className="font-mono text-[11px]">
+                {item.email_masked || "—"}
+              </span>
+              {item.subject ? (
+                <span className="text-[var(--text-subtle)]">— {item.subject}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
       ) : null}
     </div>
   );
