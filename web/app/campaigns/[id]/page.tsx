@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ActivityPanel } from "@/components/campaign/ActivityPanel";
 import { AddContactDrawer } from "@/components/campaign/AddContactDrawer";
+import { CompanyResearchDrawer } from "@/components/campaign/CompanyResearchDrawer";
 import { AgentPipelineCanvas } from "@/components/campaign/AgentPipelineCanvas";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
 import { Mono } from "@/components/common/Mono";
@@ -44,6 +45,10 @@ export default function CampaignRunPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
+  const [researchCompany, setResearchCompany] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [addContactLead, setAddContactLead] = useState<LeadRow | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityAgent, setActivityAgent] = useState<PipelineAgent | null>(null);
@@ -109,6 +114,7 @@ export default function CampaignRunPage() {
   const mailLabel = q.data?.run_facts?.mail_account_label
     ? String(q.data.run_facts.mail_account_label)
     : null;
+  const autopilot = q.data?.run_facts?.autopilot !== false;
 
   return (
     <>
@@ -180,6 +186,12 @@ export default function CampaignRunPage() {
               }
             />
           </div>
+          {autopilot ? (
+            <p className="rounded-[8px] border border-[var(--status-info)] bg-[var(--status-info-soft)] px-3 py-2 text-[12px] text-[var(--text)]">
+              Autopilot is on — verified emails send without manual approval. Pause all
+              sending anytime in Settings.
+            </p>
+          ) : null}
           {sendMode === "gmail_test" ? (
             <p className="rounded-[8px] border border-[var(--status-warning)] bg-[var(--status-warning-soft)] px-3 py-2 text-[12px] text-[var(--text)]">
               Gmail test mode: mail only goes to your test-recipient allowlist. Contact
@@ -243,7 +255,20 @@ export default function CampaignRunPage() {
                               lead.contact_name || "—"
                             )}
                           </TableCell>
-                          <TableCell className="text-[13px]">{lead.company_name}</TableCell>
+                          <TableCell
+                            className="text-[13px] text-[var(--accent)] underline-offset-2 hover:underline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (lead.company_id) {
+                                setResearchCompany({
+                                  id: lead.company_id,
+                                  name: lead.company_name,
+                                });
+                              }
+                            }}
+                          >
+                            {lead.company_name}
+                          </TableCell>
                           <TableCell>
                             <Mono className="text-[12px]">{lead.email_masked || "—"}</Mono>
                           </TableCell>
@@ -292,6 +317,14 @@ export default function CampaignRunPage() {
           </div>
         </div>
       ) : null}
+
+      <CompanyResearchDrawer
+        open={Boolean(researchCompany)}
+        onOpenChange={(o) => !o && setResearchCompany(null)}
+        campaignId={id}
+        companyId={researchCompany?.id ?? null}
+        companyName={researchCompany?.name}
+      />
 
       <LeadReplyDrawer
         open={Boolean(selectedLead)}

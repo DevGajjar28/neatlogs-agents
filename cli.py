@@ -174,6 +174,7 @@ def run_campaign(campaign_id: str = typer.Argument(..., help="Campaign id create
         template_id=meta.get("template_id"),
         template_name=meta.get("template_name"),
         template_snapshot=meta.get("template_snapshot"),
+        autopilot=meta.get("autopilot", True),
         kind="start",
         fresh=True,
     )

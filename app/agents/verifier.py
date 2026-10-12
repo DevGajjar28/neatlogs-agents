@@ -179,10 +179,16 @@ def verifier_node(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def route_after_verifier(state: dict[str, Any]) -> Literal["email_writer", "approval_gate"]:
+def route_after_verifier(
+    state: dict[str, Any],
+) -> Literal["email_writer", "approval_gate", "autopilot_gate"]:
     nxt = (state.get("plan") or {}).get("next_verify") or "pass"
     if nxt == "redraft":
         return "email_writer"
+    from app.infra.autopilot import state_autopilot_enabled
+
+    if state_autopilot_enabled(state):
+        return "autopilot_gate"
     return "approval_gate"
 
 

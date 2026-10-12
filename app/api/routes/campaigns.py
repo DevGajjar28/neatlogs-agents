@@ -18,6 +18,7 @@ from app.api.schemas import (
     BudgetOut,
     CampaignDetail,
     CampaignSummary,
+    CompanyResearchOut,
     CreateCampaignIn,
     EmailBulkIn,
     EmailDecisionIn,
@@ -227,6 +228,7 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
         "template_id": tpl_snap["template_id"],
         "template_name": tpl_snap["template_name"],
         "template_snapshot": tpl_snap["template_snapshot"],
+        "autopilot": True,
     }
     ensure_campaign_row(
         cid,
@@ -332,6 +334,7 @@ def get_campaign(campaign_id: str) -> CampaignDetail:
             "target_mode": opts.get("target_mode") or base.target_mode,
             "template_id": opts.get("template_id"),
             "template_name": opts.get("template_name"),
+            "autopilot": opts.get("autopilot") is not False,
         },
         is_alive=run_manager.is_alive(campaign_id),
         can_resume=can_resume(campaign_id),
@@ -765,6 +768,46 @@ def resume(campaign_id: str) -> dict[str, Any]:
 @router.get("/campaigns/{campaign_id}/companies")
 def get_companies(campaign_id: str) -> list[dict[str, Any]]:
     return state_reader.companies(campaign_id)
+
+
+@router.get(
+    "/campaigns/{campaign_id}/companies/{company_id}",
+    response_model=CompanyResearchOut,
+)
+def get_company_research(campaign_id: str, company_id: str) -> CompanyResearchOut:
+    companies = {
+        c["id"]: c
+        for c in state_reader.companies(campaign_id)
+        if isinstance(c, dict) and c.get("id")
+    }
+    company = companies.get(company_id)
+    if not company:
+        raise HTTPException(404, detail="Company not found in campaign")
+    accounts = state_reader.accounts(campaign_id)
+    account = accounts.get(company_id)
+    contacts = [
+        c
+        for c in state_reader.contacts(campaign_id)
+        if isinstance(c, dict) and c.get("company_id") == company_id
+    ]
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn = connect(settings.db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id FROM leads WHERE campaign_id = ? AND company_id = ?",
+            (campaign_id, company_id),
+        ).fetchall()
+    finally:
+        conn.close()
+    lead_ids = [str(r["id"]) for r in rows]
+    return CompanyResearchOut(
+        company_id=company_id,
+        company=company,
+        account=account if isinstance(account, dict) else None,
+        contacts=contacts,
+        lead_ids=lead_ids,
+    )
 
 
 @router.get("/campaigns/{campaign_id}/seller")
@@ -1297,10 +1340,26 @@ def add_manual_contact(
             if isinstance(i, dict) and i.get("contact_id") != contact_id
         ]
         pending_payload["items"] = existing + [approval_item]
-    extras["pending_email_approval"] = pending_payload
-    # Clear prior send skip / approvals for this contact
+    settings = get_settings()
+    init_db(settings.db_path)
+    conn_opts = connect(settings.db_path)
+    try:
+        crow = conn_opts.execute(
+            "SELECT options_json FROM campaigns WHERE id = ?", (campaign_id,)
+        ).fetchone()
+    finally:
+        conn_opts.close()
+    from app.infra.autopilot import campaign_autopilot_from_db_options
+
+    campaign_opts = json.loads(crow["options_json"] or "{}") if crow else {}
+    autopilot_on = campaign_autopilot_from_db_options(campaign_opts)
     approvals = dict(extras.get("email_approvals") or {})
     approvals.pop(contact_id, None)
+    if autopilot_on and verifier_map[contact_id].get("passed"):
+        approvals[contact_id] = {"approved": True}
+        extras.pop("pending_email_approval", None)
+    else:
+        extras["pending_email_approval"] = pending_payload
     extras["email_approvals"] = approvals
 
     state_reader.update_values(
@@ -1369,8 +1428,56 @@ def add_manual_contact(
 
     set_stage(campaign_id, "emails", "done", f"{len(drafts)} sequences")
     set_stage(campaign_id, "verify", "done", "1 passed")
-    set_stage(campaign_id, "approval", "waiting")
-    set_stage(campaign_id, "send", "pending")
+    lead_status = "awaiting_approval"
+    if autopilot_on and verifier_map[contact_id].get("passed"):
+        from app.agents.sender import sender_node
+
+        set_stage(campaign_id, "approval", "done", "autopilot")
+        set_stage(campaign_id, "send", "running")
+        values2 = state_reader.get_values(campaign_id)
+        send_state = {
+            **values2,
+            "campaign_id": campaign_id,
+            "drafts": drafts,
+            "contacts": contacts,
+            "extras": extras,
+            "events": list(values2.get("events") or []),
+            "errors": list(values2.get("errors") or []),
+        }
+        out = sender_node(send_state)
+        sent_n = sum(
+            1
+            for e in (out.get("events") or [])
+            if isinstance(e, dict) and e.get("type") == "send.step1"
+        )
+        state_reader.update_values(
+            campaign_id,
+            {
+                "extras": out.get("extras") or extras,
+                "events": out.get("events") or send_state["events"],
+                "errors": out.get("errors") or send_state["errors"],
+                "plan": out.get("plan") or {"phase": "after_email"},
+            },
+        )
+        set_stage(campaign_id, "send", "done", f"{sent_n} sent")
+        if sent_n:
+            lead_status = "sent"
+            conn = connect(settings.db_path)
+            try:
+                conn.execute(
+                    "UPDATE leads SET status = ?, updated_at = ? WHERE id = ?",
+                    ("sent", now, lead_id),
+                )
+                conn.execute(
+                    "UPDATE campaigns SET status = ? WHERE id = ?",
+                    ("running", campaign_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+    else:
+        set_stage(campaign_id, "approval", "waiting")
+        set_stage(campaign_id, "send", "pending")
 
     seq0 = draft_dicts[0] if draft_dicts else {}
     seq1 = draft_dicts[1] if len(draft_dicts) > 1 else {}
@@ -1387,7 +1494,7 @@ def add_manual_contact(
         email_confidence="verified",
         fit=int(round(float(company.get("fit_score") or 0) * 100)),
         verifier="passed",
-        status="awaiting_approval",
+        status=lead_status,
         updated_at=now,
         contact_id=contact_id,
         email_1_subject=seq0.get("subject"),

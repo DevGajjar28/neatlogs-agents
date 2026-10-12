@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   BarChart3,
+  FileText,
   Inbox,
   LayoutList,
   PanelLeft,
@@ -28,6 +29,7 @@ const NAV = [
   { href: "/campaigns", label: "Campaigns", icon: LayoutList },
   { href: "/approvals", label: "Approvals", icon: Inbox },
   { href: "/outbox", label: "Outbox", icon: Send },
+  { href: "/templates", label: "Templates", icon: FileText },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: Settings2 },
 ] as const;

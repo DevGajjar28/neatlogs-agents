@@ -224,6 +224,7 @@ def execute_campaign(
     template_id: str | None = None,
     template_name: str | None = None,
     template_snapshot: str | None = None,
+    autopilot: bool | None = None,
     kind: str = "start",
     fresh: bool = True,
 ) -> dict[str, Any]:
@@ -252,6 +253,7 @@ def execute_campaign(
                 template_id=template_id,
                 template_name=template_name,
                 template_snapshot=template_snapshot,
+                autopilot=True if autopilot is None else bool(autopilot),
             )
             result = app_graph.invoke(state, config=config)
         else:
@@ -315,6 +317,7 @@ def load_campaign_options(campaign_id: str) -> dict[str, Any]:
             "template_name": opts.get("template_name") or inp.get("template_name"),
             "template_snapshot": opts.get("template_snapshot")
             or inp.get("template_snapshot"),
+            "autopilot": False if opts.get("autopilot") is False else True,
         }
     finally:
         conn.close()

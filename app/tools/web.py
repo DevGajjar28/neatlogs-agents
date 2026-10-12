@@ -140,6 +140,88 @@ def discover_more_onsite(home: str, html: str, limit: int = 4) -> list[str]:
     return found
 
 
+def prospect_candidate_urls(home: str) -> list[str]:
+    """Homepage plus common prospect research pages (about / team / people)."""
+    home = normalize_url(home)
+    host = domain_of(home)
+    paths = [
+        "",
+        "/about",
+        "/about-us",
+        "/company",
+        "/team",
+        "/people",
+        "/leadership",
+        "/our-team",
+        "/who-we-are",
+    ]
+    urls: list[str] = []
+    for path in paths:
+        candidate = home if path == "" else home + path
+        if domain_of(candidate) == host and candidate not in urls:
+            urls.append(candidate)
+    return urls[:MAX_PAGES]
+
+
+def discover_more_prospect_onsite(home: str, html: str, limit: int = 4) -> list[str]:
+    soup = BeautifulSoup(html, "html.parser")
+    host = domain_of(home)
+    found: list[str] = []
+    keywords = ("about", "team", "people", "leadership", "company", "who we")
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        full = urljoin(home + "/", href)
+        if domain_of(full) != host:
+            continue
+        low = full.lower()
+        if any(k in low for k in keywords) and full not in found:
+            found.append(normalize_url(full))
+        if len(found) >= limit:
+            break
+    return found
+
+
+def fetch_prospect_pages(website: str) -> list[dict]:
+    """Fetch up to MAX_PAGES on-site prospect pages. Each item: url, text, quarantined."""
+    if not website or not str(website).strip():
+        return []
+    home = normalize_url(website if "://" in website else f"https://{website}")
+    pages: list[dict] = []
+    seen: set[str] = set()
+    with httpx.Client(
+        timeout=FETCH_TIMEOUT,
+        follow_redirects=True,
+        headers={"User-Agent": USER_AGENT},
+    ) as client:
+        queue = prospect_candidate_urls(home)
+        while queue and len(pages) < MAX_PAGES:
+            url = queue.pop(0)
+            if url in seen:
+                continue
+            seen.add(url)
+            final_url, text = fetch_url(url, client=client)
+            if not final_url or not text:
+                continue
+            clean, quarantined = scan_for_injection(text)
+            pages.append(
+                {
+                    "url": final_url,
+                    "text": clean,
+                    "quarantined": quarantined,
+                }
+            )
+            if len(pages) == 1:
+                try:
+                    raw = client.get(final_url)
+                    if raw.status_code < 400:
+                        for extra in discover_more_prospect_onsite(home, raw.text):
+                            if extra not in seen and extra not in queue:
+                                queue.append(extra)
+                except httpx.HTTPError:
+                    pass
+    return pages
+
+
 def fetch_seller_pages(website: str) -> list[dict]:
     """Fetch up to MAX_PAGES on-site pages. Each item: url, text."""
     home = normalize_url(website)

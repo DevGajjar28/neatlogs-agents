@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -105,6 +106,39 @@ def _parse_label_to_start(label: str | None, now: datetime) -> datetime | None:
                 return None
         return dt
 
+    # Tuesday 13th at 5:00pm / 13th at 5pm
+    m = re.search(
+        r"(?:\b("
+        + "|".join(_WEEKDAYS)
+        + r")\b[^0-9]*)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b",
+        low,
+    )
+    if m:
+        wd_name = m.group(1)
+        day = int(m.group(2))
+        hour = int(m.group(3))
+        minute = int(m.group(4) or 0)
+        ampm = m.group(5)
+        if ampm == "pm" and hour < 12:
+            hour += 12
+        if ampm == "am" and hour == 12:
+            hour = 0
+        target_wd = _WEEKDAYS[wd_name] if wd_name else None
+        for delta in range(0, 60):
+            d = now.date() + timedelta(days=delta)
+            if d.day != day:
+                continue
+            if target_wd is not None and d.weekday() != target_wd:
+                continue
+            try:
+                candidate = datetime(
+                    d.year, d.month, d.day, hour, minute, tzinfo=timezone.utc
+                )
+            except ValueError:
+                continue
+            if candidate >= now - timedelta(minutes=5):
+                return candidate
+
     # Tuesday 2:00 PM UTC
     m = re.search(
         r"\b(" + "|".join(_WEEKDAYS) + r")\b.*?\b(\d{1,2}):(\d{2})\s*(am|pm)\b",
@@ -193,6 +227,12 @@ def create_meeting_event(
         "description": (description or "")[:4000],
         "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
         "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
+        "conferenceData": {
+            "createRequest": {
+                "requestId": uuid.uuid4().hex,
+                "conferenceSolutionKey": {"type": "hangoutsMeet"},
+            }
+        },
     }
     notify = bool(settings.google_calendar_notify_attendees)
     if attendee_email and "@" in attendee_email and notify:
@@ -217,7 +257,10 @@ def create_meeting_event(
         conn.close()
 
     token = get_access_token(db_path=path)
-    params = {"sendUpdates": "all" if (notify and body.get("attendees")) else "none"}
+    params: dict[str, Any] = {
+        "sendUpdates": "all" if (notify and body.get("attendees")) else "none",
+        "conferenceDataVersion": 1,
+    }
     owns_client = http_client is None
     client = http_client or httpx.Client(timeout=30.0)
     try:
@@ -256,17 +299,24 @@ def create_meeting_event(
 
     event_id = str(data.get("id") or existing_event_id or "")
     html_link = str(data.get("htmlLink") or "")
+    meet_link = str(data.get("hangoutLink") or "")
+    if not meet_link:
+        for entry in data.get("conferenceData", {}).get("entryPoints") or []:
+            if isinstance(entry, dict) and entry.get("entryPointType") == "video":
+                meet_link = str(entry.get("uri") or "")
+                break
     conn = connect(path)
     try:
         conn.execute(
             """
             UPDATE meeting_proposals
-            SET calendar_event_id = ?, calendar_html_link = ?, updated_at = ?
+            SET calendar_event_id = ?, calendar_html_link = ?, meet_link = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 event_id or None,
                 html_link or None,
+                meet_link or None,
                 datetime.now(timezone.utc).isoformat(),
                 meeting_id,
             ),
@@ -291,4 +341,14 @@ def create_meeting_event(
             },
             db_path=path,
         )
-    return {"event_id": event_id, "html_link": html_link, "start": start.isoformat()}
+    return {
+        "event_id": event_id,
+        "html_link": html_link,
+        "meet_link": meet_link,
+        "start": start.isoformat(),
+    }
+
+
+def parse_meeting_time_from_text(text: str) -> datetime | None:
+    """Parse a meeting time from free-form reply text."""
+    return resolve_slot_start(None, text)

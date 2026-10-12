@@ -127,6 +127,7 @@ def _apply_classification(
         "not_interested",
         "question",
         "meeting_request",
+        "meeting_confirmed",
         "other",
     }:
         conn.execute(
@@ -260,6 +261,20 @@ def _maybe_draft_reply(
     db_path: str | None,
 ) -> None:
     """Run tool-less decision agent for classes that warrant a human-approved reply."""
+    from app.agents.meeting_autopilot import try_autopilot_inbound
+
+    if try_autopilot_inbound(
+        lead_id=lead_id,
+        campaign_id=campaign_id,
+        classification=classification,
+        snippet=snippet,
+        reply_id=reply_id,
+        from_masked=from_masked,
+        in_reply_to=message_id,
+        our_subject=our_subject,
+        db_path=db_path,
+    ):
+        return
     if classification not in {"interested", "question", "meeting_request"}:
         return
     from app.agents.reply_decision import ReplyTicket, run_decision_for_ticket

@@ -170,6 +170,14 @@ class ReplyDraftDecideIn(BaseModel):
     selected_slot_label: str | None = None
 
 
+class CompanyResearchOut(BaseModel):
+    company_id: str
+    company: dict[str, Any]
+    account: dict[str, Any] | None = None
+    contacts: list[dict[str, Any]] = Field(default_factory=list)
+    lead_ids: list[str] = Field(default_factory=list)
+
+
 class LeadRow(BaseModel):
     lead_id: str
     company_id: str | None = None
@@ -518,8 +526,11 @@ class PolicyEventOut(BaseModel):
 class OutboxRow(BaseModel):
     id: str
     lead_id: str | None = None
+    campaign_id: str | None = None
+    campaign_name: str | None = None
     step: int = 1
     subject: str = ""
+    body_preview: str = ""
     from_label: str = ""
     from_email: str | None = None
     send_mode: str = "sandbox"
@@ -530,6 +541,47 @@ class OutboxRow(BaseModel):
     sent_at: str | None = None
     scheduled_at: str | None = None
     open_in_gmail_url: str | None = None
+    reply_classification: str | None = None
+
+
+class OutboxSummaryOut(BaseModel):
+    total: int = 0
+    sent: int = 0
+    scheduled: int = 0
+    replied: int = 0
+    bounced: int = 0
+    opted_out: int = 0
+    drafted: int = 0
+    items: list[OutboxRow] = Field(default_factory=list)
+
+
+class ReportCampaignRow(BaseModel):
+    campaign_id: str
+    seller_name: str
+    status: str
+    mode: str = "replay"
+    started_at: str | None = None
+    leads: int = 0
+    emails_sent: int = 0
+    followups_sent: int = 0
+    replies: int = 0
+    meetings: int = 0
+    opted_out: int = 0
+    bounced: int = 0
+    credits_spent: float = 0.0
+    reply_rate: float | None = None
+
+
+class ReportsOverviewOut(BaseModel):
+    campaigns: int = 0
+    emails_sent: int = 0
+    replies: int = 0
+    meetings: int = 0
+    opted_out: int = 0
+    bounced: int = 0
+    credits_spent: float = 0.0
+    reply_rate: float | None = None
+    rows: list[ReportCampaignRow] = Field(default_factory=list)
 
 
 class ReplyOut(BaseModel):

@@ -309,8 +309,11 @@ export type PolicyEvent = {
 export type OutboxRow = {
   id: string;
   lead_id?: string | null;
+  campaign_id?: string | null;
+  campaign_name?: string | null;
   step: number;
   subject: string;
+  body_preview?: string;
   from_label: string;
   from_email?: string | null;
   send_mode: string;
@@ -321,6 +324,47 @@ export type OutboxRow = {
   sent_at?: string | null;
   scheduled_at?: string | null;
   open_in_gmail_url?: string | null;
+  reply_classification?: string | null;
+};
+
+export type OutboxSummary = {
+  total: number;
+  sent: number;
+  scheduled: number;
+  replied: number;
+  bounced: number;
+  opted_out: number;
+  drafted: number;
+  items: OutboxRow[];
+};
+
+export type ReportCampaignRow = {
+  campaign_id: string;
+  seller_name: string;
+  status: string;
+  mode: string;
+  started_at?: string | null;
+  leads: number;
+  emails_sent: number;
+  followups_sent: number;
+  replies: number;
+  meetings: number;
+  opted_out: number;
+  bounced: number;
+  credits_spent: number;
+  reply_rate?: number | null;
+};
+
+export type ReportsOverview = {
+  campaigns: number;
+  emails_sent: number;
+  replies: number;
+  meetings: number;
+  opted_out: number;
+  bounced: number;
+  credits_spent: number;
+  reply_rate?: number | null;
+  rows: ReportCampaignRow[];
 };
 
 export type ReplyRow = {
@@ -616,8 +660,35 @@ export function getPolicyRuleEvents(rule: string) {
   return api<PolicyEvent[]>(`/settings/policies/${encodeURIComponent(rule)}/events`);
 }
 
-export function listOutbox() {
-  return api<OutboxRow[]>("/outbox");
+export async function listOutbox(): Promise<OutboxSummary> {
+  const data = await api<OutboxSummary | OutboxRow[]>("/outbox");
+  // Back-compat: older API returned a bare array.
+  if (Array.isArray(data)) {
+    return {
+      total: data.length,
+      sent: data.filter((r) => r.ui_status === "Sent").length,
+      scheduled: data.filter((r) => r.ui_status === "Scheduled").length,
+      replied: data.filter((r) => r.ui_status === "Replied").length,
+      bounced: data.filter((r) => r.ui_status === "Bounced").length,
+      opted_out: data.filter((r) => r.ui_status === "Opted out").length,
+      drafted: data.filter((r) => r.ui_status === "Drafted in Gmail").length,
+      items: data,
+    };
+  }
+  return {
+    total: data.total ?? data.items?.length ?? 0,
+    sent: data.sent ?? 0,
+    scheduled: data.scheduled ?? 0,
+    replied: data.replied ?? 0,
+    bounced: data.bounced ?? 0,
+    opted_out: data.opted_out ?? 0,
+    drafted: data.drafted ?? 0,
+    items: data.items ?? [],
+  };
+}
+
+export function getReports() {
+  return api<ReportsOverview>("/reports");
 }
 
 export function listCampaignReplies(campaignId: string) {
@@ -626,6 +697,24 @@ export function listCampaignReplies(campaignId: string) {
 
 export function listCampaignLeads(campaignId: string) {
   return api<LeadRow[]>(`/campaigns/${encodeURIComponent(campaignId)}/leads`);
+}
+
+export type CompanyResearch = {
+  company_id: string;
+  company: Record<string, unknown>;
+  account?: {
+    story?: string;
+    why_now?: string[];
+    evidence?: Array<{ id: string; fact: string; source_ref?: string; source_type?: string }>;
+  } | null;
+  contacts: Array<Record<string, unknown>>;
+  lead_ids: string[];
+};
+
+export function getCompanyResearch(campaignId: string, companyId: string) {
+  return api<CompanyResearch>(
+    `/campaigns/${encodeURIComponent(campaignId)}/companies/${encodeURIComponent(companyId)}`,
+  );
 }
 
 export function addManualContact(

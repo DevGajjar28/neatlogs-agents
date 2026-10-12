@@ -117,8 +117,10 @@ def test_create_event_posts_to_google(env: Path, monkeypatch: pytest.MonkeyPatch
     mock.post.assert_called_once()
     args, kwargs = mock.post.call_args
     assert "calendars/primary/events" in args[0]
+    assert kwargs["params"].get("conferenceDataVersion") == 1
     assert kwargs["headers"]["Authorization"] == "Bearer access-token"
     assert kwargs["json"]["summary"] == "Intro call"
+    assert "conferenceData" in kwargs["json"]
 
     conn = connect(env)
     row = conn.execute(

@@ -21,6 +21,7 @@ from app.agents.account_researcher import (
     fanout_account_companies,
 )
 from app.agents.approval_gate import approval_gate_node
+from app.agents.autopilot_gate import autopilot_gate_node
 from app.agents.buyer_finder import (
     buyer_import_node,
     buyer_propose_icp_node,
@@ -50,6 +51,7 @@ NODE_STAGE: dict[str, str] = {
     "email_writer": "emails",
     "verifier": "verify",
     "approval_gate": "approval",
+    "autopilot_gate": "approval",
     "sender": "send",
 }
 
@@ -150,6 +152,7 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     graph.add_node("email_writer", wrap_node("email_writer", email_writer_node))
     graph.add_node("verifier", wrap_node("verifier", verifier_node))
     graph.add_node("approval_gate", wrap_node("approval_gate", approval_gate_node))
+    graph.add_node("autopilot_gate", wrap_node("autopilot_gate", autopilot_gate_node))
     graph.add_node("sender", wrap_node("sender", sender_node))
 
     graph.add_edge(START, "planner")
@@ -182,9 +185,11 @@ def build_graph(checkpointer: SqliteSaver | None = None):
         {
             "email_writer": "email_writer",
             "approval_gate": "approval_gate",
+            "autopilot_gate": "autopilot_gate",
         },
     )
     graph.add_edge("approval_gate", "sender")
+    graph.add_edge("autopilot_gate", "sender")
     graph.add_edge("sender", "planner")
 
     return graph.compile(checkpointer=checkpointer)
@@ -220,6 +225,7 @@ def initial_state(
     template_id: str | None = None,
     template_name: str | None = None,
     template_snapshot: str | None = None,
+    autopilot: bool = True,
 ) -> dict[str, Any]:
     extras: dict[str, Any] = {}
     if target_mode == "provided":
@@ -242,6 +248,7 @@ def initial_state(
             "template_id": template_id,
             "template_name": template_name,
             "template_snapshot": template_snapshot,
+            "autopilot": autopilot is not False,
         },
         "plan": {},
         "budget": {"credits_spent": 0},

@@ -18,6 +18,7 @@ from app.api.schemas import (
     MeetingProposalOut,
     MeetingSlotOut,
     OutboxRow,
+    OutboxSummaryOut,
     PolicyEventOut,
     ReplyDraftDecideIn,
     ReplyDraftOut,
@@ -736,31 +737,46 @@ def policy_rule_events(rule: str) -> list[PolicyEventOut]:
         conn.close()
 
 
-@router.get("/outbox", response_model=list[OutboxRow])
-def list_outbox() -> list[OutboxRow]:
+@router.get("/outbox", response_model=OutboxSummaryOut)
+def list_outbox() -> OutboxSummaryOut:
     settings = get_settings()
     init_db(settings.db_path)
     conn = connect(settings.db_path)
     try:
         rows = conn.execute(
             """
-            SELECT e.id, e.lead_id, e.step, e.subject, e.status, e.delivery_status,
+            SELECT e.id, e.lead_id, e.step, e.subject, e.body, e.status, e.delivery_status,
                    e.send_mode, e.message_id, e.actual_recipient, e.sent_at,
                    e.mail_account_id, a.label AS account_label, a.email AS account_email,
-                   l.status AS lead_status,
+                   l.status AS lead_status, l.campaign_id AS campaign_id,
+                   c.seller_name AS campaign_name,
                    (
                      SELECT j.run_at FROM scheduled_jobs j
                      WHERE j.email_id = e.id OR (j.lead_id = e.lead_id AND e.step > 1)
                      ORDER BY j.run_at DESC LIMIT 1
-                   ) AS scheduled_at
+                   ) AS scheduled_at,
+                   (
+                     SELECT r.classification FROM replies r
+                     WHERE r.lead_id = e.lead_id
+                     ORDER BY r.received_at DESC LIMIT 1
+                   ) AS reply_classification
             FROM emails e
             LEFT JOIN mail_accounts a ON a.id = e.mail_account_id
             LEFT JOIN leads l ON l.id = e.lead_id
+            LEFT JOIN campaigns c ON c.id = l.campaign_id
             ORDER BY COALESCE(e.sent_at, e.id) DESC
-            LIMIT 200
+            LIMIT 300
             """
         ).fetchall()
         out: list[OutboxRow] = []
+        counts = {
+            "sent": 0,
+            "scheduled": 0,
+            "replied": 0,
+            "bounced": 0,
+            "opted_out": 0,
+            "drafted": 0,
+        }
         for r in rows:
             mode = r["send_mode"] or "sandbox"
             delivery = r["delivery_status"] or r["status"] or "queued"
@@ -781,6 +797,16 @@ def list_outbox() -> list[OutboxRow]:
                 ui_status = "Scheduled"
             else:
                 ui_status = delivery.title()
+            key = {
+                "Replied": "replied",
+                "Opted out": "opted_out",
+                "Bounced": "bounced",
+                "Drafted in Gmail": "drafted",
+                "Scheduled": "scheduled",
+                "Sent": "sent",
+            }.get(ui_status)
+            if key:
+                counts[key] += 1
             gmail_url = None
             if r["message_id"] and r["account_email"] and mode != "sandbox":
                 mid = str(r["message_id"]).strip("<>")
@@ -788,12 +814,17 @@ def list_outbox() -> list[OutboxRow]:
                     f"https://mail.google.com/mail/u/{r['account_email']}/"
                     f"#search/rfc822msgid:{mid}"
                 )
+            body = str(r["body"] or "")
+            preview = " ".join(body.split())[:220]
             out.append(
                 OutboxRow(
                     id=str(r["id"]),
                     lead_id=r["lead_id"],
+                    campaign_id=r["campaign_id"],
+                    campaign_name=r["campaign_name"],
                     step=int(r["step"] or 1),
                     subject=r["subject"] or "",
+                    body_preview=preview,
                     from_label=r["account_label"] or r["account_email"] or "Sandbox",
                     from_email=r["account_email"],
                     send_mode=mode,
@@ -804,8 +835,18 @@ def list_outbox() -> list[OutboxRow]:
                     sent_at=r["sent_at"],
                     scheduled_at=r["scheduled_at"],
                     open_in_gmail_url=gmail_url,
+                    reply_classification=r["reply_classification"],
                 )
             )
-        return out
+        return OutboxSummaryOut(
+            total=len(out),
+            sent=counts["sent"],
+            scheduled=counts["scheduled"],
+            replied=counts["replied"],
+            bounced=counts["bounced"],
+            opted_out=counts["opted_out"],
+            drafted=counts["drafted"],
+            items=out,
+        )
     finally:
         conn.close()

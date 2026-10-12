@@ -315,6 +315,7 @@ _MAIL_ACCOUNT_COLS = {
 _MEETING_PROPOSAL_COLS = {
     "calendar_event_id": "TEXT",
     "calendar_html_link": "TEXT",
+    "meet_link": "TEXT",
 }
 
 

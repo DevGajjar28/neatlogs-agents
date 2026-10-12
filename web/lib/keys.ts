@@ -6,6 +6,8 @@ export const queryKeys = {
   campaignReplies: (id: string) => ["campaigns", id, "replies"] as const,
   campaignPipeline: (id: string) => ["campaigns", id, "pipeline"] as const,
   campaignEvents: (id: string) => ["campaigns", id, "events"] as const,
+  companyResearch: (campaignId: string, companyId: string) =>
+    ["campaigns", campaignId, "companies", companyId] as const,
   pendingApprovals: (id: string) => ["campaigns", id, "pending-approvals"] as const,
   approvalsInbox: ["approvals", "inbox"] as const,
   mailAccounts: ["mail-accounts"] as const,
@@ -16,4 +18,5 @@ export const queryKeys = {
   emailTemplates: ["email-templates"] as const,
   emailTemplate: (id: string) => ["email-templates", id] as const,
   outbox: ["outbox"] as const,
+  reports: ["reports"] as const,
 };

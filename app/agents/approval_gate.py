@@ -11,15 +11,13 @@ from app.tools.mailer import lead_id_for
 from app.infra.events import EventBag
 
 
-def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
-    """Interrupt with draft queue; resume with per-contact approvals."""
-    campaign_id = state["campaign_id"]
-    contacts = {c["id"]: c for c in (state.get("contacts") or []) if isinstance(c, dict)}
-    drafts = state.get("drafts") or {}
-    verifier = state.get("verifier") or {}
-    events = EventBag(state, "approval_gate")
-    items = []
-
+def _approval_items(
+    contacts: dict[str, dict],
+    drafts: dict[str, Any],
+    verifier: dict[str, Any],
+    campaign_id: str,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
     for contact_id, sequence in drafts.items():
         v = verifier.get(contact_id) or {}
         if not v.get("passed") and v.get("action") not in {"pass", "downgrade"}:
@@ -42,6 +40,17 @@ def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
                 "cited_evidence_ids": step1.get("cited_evidence_ids") or [],
             }
         )
+    return items
+
+
+def approval_gate_node(state: dict[str, Any]) -> dict[str, Any]:
+    """Interrupt with draft queue; resume with per-contact approvals."""
+    campaign_id = state["campaign_id"]
+    contacts = {c["id"]: c for c in (state.get("contacts") or []) if isinstance(c, dict)}
+    drafts = state.get("drafts") or {}
+    verifier = state.get("verifier") or {}
+    events = EventBag(state, "approval_gate")
+    items = _approval_items(contacts, drafts, verifier, campaign_id)
 
     if not items:
         events.append({"type": "approval.empty_queue"})
