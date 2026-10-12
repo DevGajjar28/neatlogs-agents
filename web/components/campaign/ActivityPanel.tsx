@@ -41,9 +41,20 @@ export function ActivityPanel({
   agentLabel,
 }: Props) {
   const allowed = agentFilter ? AGENT_FILTER[agentFilter] || [agentFilter] : null;
-  const filtered = allowed
+  const filtered = (allowed
     ? events.filter((e) => allowed.includes(e.agent))
-    : events;
+    : events
+  ).filter((e) => {
+    // Don't show raw Crustdata balance errors on product research — site fetch is the path.
+    const msg = `${e.message || ""} ${e.type || ""}`.toLowerCase();
+    if (e.agent === "product_researcher" && msg.includes("insufficient credit")) {
+      return false;
+    }
+    if (e.type === "error" && msg.includes("buy credits") && e.agent === "product_researcher") {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

@@ -242,6 +242,10 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
             plan["next"] = "account_researcher"
     elif phase == "after_account":
         # Drop/replace: promote overfetch buffer into kept slots left empty by no_contact.
+        # When Crustdata is out of credits, skip promotions (retries would 402) and email
+        # whoever we already found.
+        contacts = state.get("contacts") or []
+        crustdata_exhausted = bool((state.get("extras") or {}).get("crustdata_exhausted"))
         companies = [Company.model_validate(c) for c in (state.get("companies") or [])]
         kept = [c for c in companies if c.status == "kept"]
         buffer = [
@@ -249,33 +253,64 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
             for c in companies
             if c.status == "dropped" and c.drop_reason == "below_top_n"
         ]
-        promoted: list[Company] = []
-        while len(kept) + len(promoted) < n and buffer:
-            nxt = buffer.pop(0)
-            nxt.status = "kept"
-            nxt.drop_reason = None
-            promoted.append(nxt)
-        if promoted:
-            events.append(
-                {
-                    "type": "plan.replace_no_contact",
-                    "promoted": len(promoted),
-                    "company_ids": [c.id for c in promoted],
-                    "kept_before": len(kept),
-                    "n": n,
-                }
-            )
-            # Rewrite company list with promotions applied.
-            by_id = {c.id: c for c in companies}
-            for company in promoted:
-                by_id[company.id] = company
-            updates["companies"] = [c.model_dump(mode="json") for c in by_id.values()]
-            plan["next"] = "account_researcher"
-            plan["phase"] = "need_account_retry"
+
+        if crustdata_exhausted:
+            if contacts:
+                events.append(
+                    {
+                        "type": "plan.partial_contacts",
+                        "count": len(contacts),
+                        "crustdata_exhausted": True,
+                        "action": "write_emails_for_found",
+                    }
+                )
+                plan["next"] = "email_writer"
+            else:
+                from app.infra.events import set_stage
+
+                if campaign_id:
+                    set_stage(
+                        campaign_id,
+                        "emails",
+                        "done",
+                        "0 drafts — add a contact",
+                    )
+                    set_stage(campaign_id, "verify", "skipped")
+                    set_stage(campaign_id, "approval", "skipped")
+                    set_stage(campaign_id, "send", "skipped")
+                events.append(
+                    {
+                        "type": "plan.no_contacts",
+                        "detail": "No contacts found; Crustdata exhausted — add a contact",
+                        "crustdata_exhausted": True,
+                    }
+                )
+                plan["next"] = "done"
+                plan["phase"] = "awaiting_manual_contact"
         else:
-            contacts = state.get("contacts") or []
-            if not contacts:
-                # No people found — finish run; user can add contacts manually.
+            promoted: list[Company] = []
+            while len(kept) + len(promoted) < n and buffer:
+                nxt = buffer.pop(0)
+                nxt.status = "kept"
+                nxt.drop_reason = None
+                promoted.append(nxt)
+            if promoted:
+                events.append(
+                    {
+                        "type": "plan.replace_no_contact",
+                        "promoted": len(promoted),
+                        "company_ids": [c.id for c in promoted],
+                        "kept_before": len(kept),
+                        "n": n,
+                    }
+                )
+                by_id = {c.id: c for c in companies}
+                for company in promoted:
+                    by_id[company.id] = company
+                updates["companies"] = [c.model_dump(mode="json") for c in by_id.values()]
+                plan["next"] = "account_researcher"
+                plan["phase"] = "need_account_retry"
+            elif not contacts:
                 from app.infra.events import set_stage
 
                 if campaign_id:

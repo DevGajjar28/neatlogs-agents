@@ -18,6 +18,15 @@ TEMPLATES: dict[str, str] = {
     "halt.paused": "Paused by you. Resume to continue from {stage}.",
     "product.customers_identified": "Identified {count} named customers from the seller site.",
     "product.no_customers": "No named customers found; ICP will be lower confidence.",
+    "fallback.seller_crustdata_skipped": "Product research used the seller website (no Crustdata credits spent).",
+    "fallback.crustdata_exhausted": "Crustdata credits unavailable — falling back to Hunter for contacts.",
+    "fallback.account_enrich_skipped": "Company enrich skipped; continuing with Hunter contact fallback.",
+    "fallback.person_search_skipped": "Skipped Crustdata person search (credits exhausted).",
+    "fallback.hunter_eligible": "Looking up contacts via Hunter fallback.",
+    "fallback.hunter_email": "Filled email via Hunter for a contact.",
+    "fallback.hunter_domain": "Found a contact via Hunter domain search.",
+    "fallback.hunter_skipped": "Hunter had no hit for this company.",
+    "plan.partial_contacts": "Found {count} contact(s) — writing emails for those; skipping empty rows.",
     "security.injection_quarantined": "Quarantined instruction-like text from a researched page.",
     "error": "Error in {step}: {detail}",
     "buyer.narrow_icp": "Forced a narrow ICP for replan testing.",
@@ -124,7 +133,19 @@ def level_for(event_type: str) -> str:
     return "info"
 
 
+def _is_credit_noise(text: str) -> bool:
+    t = text.lower()
+    return "nsufficient credit" in t or "buy credits" in t or "out of credits" in t
+
+
 def format_message(event_type: str, data: dict[str, Any]) -> str:
+    if event_type == "error":
+        detail = str(data.get("detail") or data.get("error") or "")
+        step = str(data.get("step") or "")
+        if _is_credit_noise(detail):
+            if "product" in step:
+                return "Product research used the seller website (Crustdata credits unavailable)."
+            return "Crustdata credits unavailable; using Hunter and other fallbacks."
     template = TEMPLATES.get(event_type)
     if not template:
         return f"Event {event_type}."

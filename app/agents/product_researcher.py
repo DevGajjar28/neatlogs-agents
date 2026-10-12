@@ -1,18 +1,18 @@
-"""Product researcher: seller brief and evidence cards from the seller site."""
+"""Product researcher: seller brief from the seller website + LLM (no Crustdata)."""
 
 from __future__ import annotations
 
 import json
 import re
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 from app.agents.evidence import make_evidence
+from app.infra.events import EventBag
 from app.llm import get_llm
 from app.models import SellerBrief
 from app.tools import web
-from app.tools.crustdata import CrustdataError, client_for_campaign
-from app.infra.events import EventBag
 
 
 class _ExtractedSeller(BaseModel):
@@ -28,7 +28,7 @@ def _domain(website: str) -> str:
 
 
 def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
-    """v0: fetch site, identify/enrich seller, LLM extract into SellerBrief."""
+    """Fetch seller site + LLM extract into SellerBrief. Crustdata is not used here."""
     inp = state["input"]
     campaign_id = state["campaign_id"]
     company_name = inp["company_name"]
@@ -37,12 +37,18 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
     events = EventBag(state, "product_researcher")
     errors = list(state.get("errors") or [])
 
-    client = client_for_campaign(state)
     domain = _domain(website)
     evidence = []
     pages = web.fetch_seller_pages(website)
     page_blob = "\n\n".join(f"URL: {p['url']}\n{p['text'][:3000]}" for p in pages)[:14000]
-    seller_profile: dict[str, Any] = {}
+
+    events.append(
+        {
+            "type": "fallback.seller_crustdata_skipped",
+            "detail": "product research uses website fetch + LLM only",
+            "domain": domain,
+        }
+    )
 
     for page in pages:
         for snippet in page.get("quarantined") or []:
@@ -66,47 +72,6 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
                 )
             )
 
-    seller_id = None
-    try:
-        identified = client.company_identify(
-            {"domains": [domain]},
-            campaign_id=campaign_id,
-            step="product.identify",
-        )
-        # response shapes vary; try common paths
-        seller_id = _first_company_id(identified)
-        if seller_id:
-            enriched = client.company_enrich(
-                {
-                    "crustdata_company_ids": [seller_id],
-                    "fields": [
-                        "basic_info",
-                        "taxonomy",
-                        "headcount",
-                        "funding",
-                        "locations",
-                        "competitors",
-                    ],
-                },
-                campaign_id=campaign_id,
-                step="product.enrich",
-            )
-            company_data = _first_company_data(enriched)
-            if company_data:
-                seller_profile = company_data
-                name = (company_data.get("basic_info") or {}).get("name") or company_name
-                evidence.append(
-                    make_evidence(
-                        f"Crustdata profile for {name} ({domain})",
-                        source_type="crustdata",
-                        source_ref=f"crustdata:/company/enrich:basic_info",
-                        confidence="high",
-                    )
-                )
-    except CrustdataError as exc:
-        errors.append({"step": "product_researcher", "error": str(exc)})
-        events.append({"type": "error", "step": "product_researcher", "detail": str(exc)})
-
     heuristic_customers = web.heuristic_named_customers(pages)
     llm = get_llm("fast")
     prompt = (
@@ -121,7 +86,7 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
         extracted = structured.invoke(prompt)
         if not isinstance(extracted, _ExtractedSeller):
             extracted = _ExtractedSeller.model_validate(extracted)
-    except Exception as exc:  # noqa: BLE001 — v0 soft-fail to heuristics
+    except Exception as exc:  # noqa: BLE001 — soft-fail to heuristics
         errors.append({"step": "product_researcher.llm", "error": str(exc)})
         if "llm_bad_json" in str(exc):
             events.append({"type": "recovery.llm_bad_json", "step": "product_researcher"})
@@ -138,28 +103,10 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
         if clean and clean.lower() not in {company_name.lower(), domain} and clean not in named:
             named.append(clean)
 
-    # identify customer names (free)
-    if named:
-        try:
-            cust_ids = client.company_identify(
-                {"names": named[:25]},
-                campaign_id=campaign_id,
-                step="product.customers_identify",
-            )
-            kept_names = _confident_customer_names(cust_ids, named)
-            if kept_names:
-                named = kept_names
-                events.append(
-                    {
-                        "type": "product.customers_identified",
-                        "count": len(kept_names),
-                    }
-                )
-        except CrustdataError as exc:
-            errors.append({"step": "product.customers_identify", "error": str(exc)})
-
     if not named:
-        events.append({"type": "product.no_customers", "detail": "buyer_finder will use low-confidence ICP"})
+        events.append(
+            {"type": "product.no_customers", "detail": "buyer_finder will use low-confidence ICP"}
+        )
 
     for name in named[:8]:
         evidence.append(
@@ -181,14 +128,10 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
         named_customers=named,
         evidence=evidence,
     )
-    spent = client.ledger.spent(campaign_id)
-    client.close()
-    extras = dict(state.get("extras") or {})
-    if seller_profile:
-        extras["seller_profile"] = seller_profile
+    spent = float((state.get("budget") or {}).get("credits_spent") or 0)
     return {
         "seller": brief.model_dump(mode="json"),
-        "extras": extras,
+        "extras": dict(state.get("extras") or {}),
         "events": events,
         "errors": errors,
         "budget": {"credits_spent": spent},
@@ -205,6 +148,7 @@ def _first_company_id(payload: Any) -> int | str | None:
 
 
 def _first_company_data(payload: Any) -> dict | None:
+    """Shared helper for buyer_finder / identify response shapes."""
     rows: list[dict] = []
     if isinstance(payload, list):
         rows = [r for r in payload if isinstance(r, dict)]
@@ -212,7 +156,11 @@ def _first_company_data(payload: Any) -> dict | None:
         if "matches" in payload:
             rows = [payload]
         else:
-            rows = [r for r in (payload.get("companies") or payload.get("results") or []) if isinstance(r, dict)]
+            rows = [
+                r
+                for r in (payload.get("companies") or payload.get("results") or [])
+                if isinstance(r, dict)
+            ]
     for item in rows:
         matches = item.get("matches") or []
         if matches and isinstance(matches[0], dict):
@@ -247,7 +195,9 @@ def _confident_customer_names(payload: Any, originals: list[str]) -> list[str]:
             domain = basic.get("primary_domain") or data.get("primary_domain")
             if not domain and not name:
                 continue
-            label = name or next((o for o in originals if o.lower() in json.dumps(row).lower()), None)
+            label = name or next(
+                (o for o in originals if o.lower() in json.dumps(row).lower()), None
+            )
             if label and label not in kept:
                 kept.append(str(label))
     if not kept:

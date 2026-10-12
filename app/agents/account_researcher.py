@@ -108,7 +108,8 @@ def account_enrich_node(state: dict[str, Any]) -> dict[str, Any]:
             continue
 
     enrich_by_id: dict[str, dict] = {}
-    if ids:
+    crustdata_exhausted = bool((state.get("extras") or {}).get("crustdata_exhausted"))
+    if ids and not crustdata_exhausted:
         try:
             enriched = client.company_enrich(
                 {
@@ -120,8 +121,23 @@ def account_enrich_node(state: dict[str, Any]) -> dict[str, Any]:
             )
             enrich_by_id = _index_enrich(enriched)
             events.append({"type": "account.enriched", "count": len(enrich_by_id)})
+        except OutOfCredits as exc:
+            crustdata_exhausted = True
+            events.append(
+                {
+                    "type": "fallback.crustdata_exhausted",
+                    "step": "account.enrich",
+                    "detail": str(exc)[:200],
+                }
+            )
         except CrustdataError as exc:
-            errors.append({"step": "account.enrich", "error": str(exc)})
+            # Soft-fail enrich; contact chain can still use Hunter.
+            events.append(
+                {
+                    "type": "fallback.account_enrich_skipped",
+                    "detail": str(exc)[:200],
+                }
+            )
 
     if "empty_people" in get_chaos().flags:
         for data in enrich_by_id.values():
@@ -131,6 +147,7 @@ def account_enrich_node(state: dict[str, Any]) -> dict[str, Any]:
     extras = dict(state.get("extras") or {})
     extras["enrich_by_id"] = enrich_by_id
     extras["live_people_enabled"] = _live_people_enabled()
+    extras["crustdata_exhausted"] = crustdata_exhausted
     spent = client.ledger.spent(campaign_id)
     client.close()
     return {
@@ -153,6 +170,7 @@ def fanout_account_companies(state: dict[str, Any]) -> list[Send] | str:
     titles = _buyer_titles_from_icp(state.get("icp") or {})
     enrich_by_id = (state.get("extras") or {}).get("enrich_by_id") or {}
     live_enabled = bool((state.get("extras") or {}).get("live_people_enabled"))
+    crustdata_exhausted = bool((state.get("extras") or {}).get("crustdata_exhausted"))
     campaign_mode = ((state.get("input") or {}).get("mode") or "replay")
 
     return [
@@ -164,6 +182,7 @@ def fanout_account_companies(state: dict[str, Any]) -> list[Send] | str:
                 "enrich_data": enrich_by_id.get(str(company.id), {}),
                 "titles": titles,
                 "live_people_enabled": live_enabled,
+                "crustdata_exhausted": crustdata_exhausted,
                 "campaign_mode": campaign_mode,
             },
         )
@@ -178,6 +197,7 @@ def account_company_node(state: dict[str, Any]) -> dict[str, Any]:
     data = dict(state.get("enrich_data") or {})
     titles = list(state.get("titles") or [])
     live_enabled = bool(state.get("live_people_enabled"))
+    crustdata_exhausted = bool(state.get("crustdata_exhausted"))
     events: list[dict] = [
         {"type": "account.researching", "company": company.name, "company_id": company.id}
     ]
@@ -192,6 +212,7 @@ def account_company_node(state: dict[str, Any]) -> dict[str, Any]:
             titles=titles,
             campaign_id=campaign_id,
             live_people_enabled=live_enabled,
+            crustdata_exhausted=crustdata_exhausted,
             events=events,
             errors=errors,
         )
@@ -235,9 +256,18 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
     campaign_id = state["campaign_id"]
     data_mode = campaign_data_mode(state)
     email_by_url: dict[str, tuple[str | None, str, str]] = {}
+    crustdata_exhausted = bool((state.get("extras") or {}).get("crustdata_exhausted"))
+    for shard in shards:
+        if any(
+            (e.get("type") == "fallback.crustdata_exhausted")
+            or (isinstance(e.get("error"), str) and "nsufficient credit" in e.get("error", "").lower())
+            for e in (shard.get("events") or []) + (shard.get("errors") or [])
+        ):
+            crustdata_exhausted = True
+
     try:
         urls = [u for _, u, _ in pending_urls][:25]
-        if urls:
+        if urls and not crustdata_exhausted:
             try:
                 enriched = client.person_enrich(
                     {
@@ -249,8 +279,24 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
                 )
                 events.append({"type": "account.person_enrich_batch", "count": len(urls)})
                 email_by_url = _emails_from_person_enrich(enriched)
-            except (CrustdataError, OutOfCredits, BudgetExceeded) as exc:
-                errors.append({"step": "account.person_enrich_batch", "error": str(exc)})
+            except OutOfCredits as exc:
+                crustdata_exhausted = True
+                events.append(
+                    {
+                        "type": "fallback.crustdata_exhausted",
+                        "step": "account.person_enrich_batch",
+                        "detail": str(exc)[:200],
+                        "count": len(urls),
+                    }
+                )
+                events.append(
+                    {
+                        "type": "fallback.hunter_eligible",
+                        "reason": "OutOfCredits",
+                        "count": len(urls),
+                    }
+                )
+            except (CrustdataError, BudgetExceeded) as exc:
                 events.append(
                     {
                         "type": "fallback.hunter_eligible",
@@ -258,6 +304,14 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
                         "count": len(urls),
                     }
                 )
+        elif urls and crustdata_exhausted:
+            events.append(
+                {
+                    "type": "fallback.hunter_eligible",
+                    "reason": "crustdata_exhausted",
+                    "count": len(urls),
+                }
+            )
 
         for company_id, person in contacts_by_company.items():
             profile_url = person.get("profile_url")
@@ -305,6 +359,7 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
                     campaign_id=campaign_id,
                     events=events,
                     errors=errors,
+                    crustdata_exhausted=crustdata_exhausted,
                 )
                 if guessed:
                     email, email_source, email_confidence = guessed
@@ -358,10 +413,13 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
     finally:
         client.close()
 
+    extras = dict(state.get("extras") or {})
+    extras["crustdata_exhausted"] = crustdata_exhausted
     return {
         "accounts": accounts,
         "contacts": contacts,
         "companies": [c.model_dump(mode="json") for c in companies],
+        "extras": extras,
         "events": events,
         "errors": errors,
         "budget": {"credits_spent": spent},
@@ -390,6 +448,7 @@ def account_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
                 titles=titles,
                 campaign_id=merged["campaign_id"],
                 live_people_enabled=bool(extras.get("live_people_enabled")),
+                crustdata_exhausted=bool(extras.get("crustdata_exhausted")),
                 events=events,
                 errors=errors,
             )
@@ -422,6 +481,7 @@ def _prospect_site_pages(
     campaign_id: str,
     events: list[dict],
     errors: list[dict],
+    crustdata_exhausted: bool = False,
 ) -> list[dict]:
     website = _company_website(company)
     if not website:
@@ -438,7 +498,7 @@ def _prospect_site_pages(
         )
         return pages
     settings = get_settings()
-    if settings.data_mode != "live" or settings.demo_mode:
+    if crustdata_exhausted or settings.data_mode != "live" or settings.demo_mode:
         return []
     try:
         urls = web.prospect_candidate_urls(website)[:8]
@@ -570,6 +630,7 @@ def research_company(
     live_people_enabled: bool,
     events: list[dict],
     errors: list[dict],
+    crustdata_exhausted: bool = False,
 ) -> dict[str, Any]:
     """Build account brief + find a person (name/url) via the fallback chain."""
     evidence = [
@@ -581,12 +642,26 @@ def research_company(
         )
     ]
     site_pages = _prospect_site_pages(
-        client, company=company, campaign_id=campaign_id, events=events, errors=errors
+        client,
+        company=company,
+        campaign_id=campaign_id,
+        events=events,
+        errors=errors,
+        crustdata_exhausted=crustdata_exhausted,
     )
     evidence.extend(
         _prospect_web_evidence(site_pages, company=company, events=events)
     )
-    why_now = _why_now_from_news(company, data, evidence, client, campaign_id, events, errors)
+    why_now = _why_now_from_news(
+        company,
+        data,
+        evidence,
+        client,
+        campaign_id,
+        events,
+        errors,
+        crustdata_exhausted=crustdata_exhausted,
+    )
     if not why_now:
         why_now = [f"Active lookalike of seller ICP [{evidence[0].id}]"]
 
@@ -605,6 +680,7 @@ def research_company(
         titles=titles,
         campaign_id=campaign_id,
         live_people_enabled=live_people_enabled,
+        crustdata_exhausted=crustdata_exhausted,
         events=events,
         errors=errors,
     )
@@ -627,8 +703,9 @@ def _find_person(
     live_people_enabled: bool,
     events: list[dict],
     errors: list[dict],
+    crustdata_exhausted: bool = False,
 ) -> dict[str, Any] | None:
-    # 1) Enrich people (already paid)
+    # 1) Enrich people (already paid) — free to read from prior enrich payload
     people = data.get("people") or {}
     candidates: list[dict] = []
     if isinstance(people, dict):
@@ -649,22 +726,44 @@ def _find_person(
             )
             return person
 
-    # 2) person/search → explain → semantic
-    person = _person_search_chain(
-        client,
-        company=company,
-        titles=titles,
-        campaign_id=campaign_id,
-        events=events,
-        errors=errors,
-    )
-    if person:
-        return person
+    # 2) person/search — skip when Crustdata is out of credits
+    if not crustdata_exhausted:
+        person = _person_search_chain(
+            client,
+            company=company,
+            titles=titles,
+            campaign_id=campaign_id,
+            events=events,
+            errors=errors,
+        )
+        if person:
+            return person
+        # Detect 402 from person search errors and flip to Hunter-only for this company
+        if any(
+            isinstance(e.get("error"), str) and "nsufficient credit" in e["error"].lower()
+            for e in errors
+            if e.get("company_id") == company.id
+        ):
+            crustdata_exhausted = True
+            events.append(
+                {
+                    "type": "fallback.crustdata_exhausted",
+                    "step": "account.person_search",
+                    "company_id": company.id,
+                }
+            )
+    else:
+        events.append(
+            {
+                "type": "fallback.person_search_skipped",
+                "company_id": company.id,
+                "reason": "crustdata_exhausted",
+            }
+        )
 
-    # 3) Live people search only if enabled
-    if live_people_enabled:
+    # 3) Live people search only if enabled and credits remain
+    if live_people_enabled and not crustdata_exhausted:
         events.append({"type": "fallback.contact_step_3", "company_id": company.id, "status": "attempted"})
-        # Endpoint is enterprise-only; treat missing client method as skip.
         events.append(
             {
                 "type": "fallback.skipped_not_enabled",
@@ -673,7 +772,7 @@ def _find_person(
                 "note": "no dedicated client wrapper; account reported enabled but path unused",
             }
         )
-    else:
+    elif not crustdata_exhausted:
         events.append(
             {
                 "type": "fallback.skipped_not_enabled",
@@ -682,7 +781,7 @@ def _find_person(
             }
         )
 
-    # 4) Hunter Domain Search when Crustdata yielded no person
+    # 4) Hunter Domain Search when Crustdata yielded no person / out of credits
     domain = (company.domain or "").strip()
     if domain:
         mode = getattr(client, "data_mode", None)
@@ -766,6 +865,19 @@ def _person_search_chain(
 
     try:
         result = client.person_search(body, campaign_id=campaign_id, step="account.person_search")
+    except OutOfCredits as exc:
+        events.append(
+            {
+                "type": "fallback.crustdata_exhausted",
+                "step": "account.person_search",
+                "company_id": company.id,
+                "detail": str(exc)[:200],
+            }
+        )
+        errors.append(
+            {"step": "account.person_search", "error": str(exc), "company_id": company.id}
+        )
+        return None
     except CrustdataError as exc:
         errors.append({"step": "account.person_search", "error": str(exc), "company_id": company.id})
         return None
@@ -868,6 +980,7 @@ def _why_now_from_news(
     campaign_id: str,
     events: list[dict],
     errors: list[dict],
+    crustdata_exhausted: bool = False,
 ) -> list[str]:
     why_now: list[str] = []
     news = data.get("news") or {}
@@ -897,7 +1010,9 @@ def _why_now_from_news(
     if why_now:
         return why_now
 
-    # News empty → web news search (paid). Skip in replay misses quietly.
+    # News empty → web news search (paid). Skip when Crustdata is exhausted.
+    if crustdata_exhausted:
+        return why_now
     start = int((datetime.now(timezone.utc) - timedelta(days=90)).timestamp())
     try:
         result = client.web_search(
@@ -939,6 +1054,7 @@ def _pattern_guess_email(
     campaign_id: str,
     events: list[dict],
     errors: list[dict],
+    crustdata_exhausted: bool = False,
 ) -> tuple[str, str, str] | None:
     if not domain or "." not in domain:
         return None
@@ -946,23 +1062,37 @@ def _pattern_guess_email(
     if not local:
         return None
     # Optional published pattern hint (1 credit) — best-effort.
-    try:
-        client.web_search(
-            {"query": f'"@{domain}" email format', "sources": ["web"]},
-            campaign_id=campaign_id,
-            step="account.email_pattern",
-        )
-        events.append({"type": "fallback.contact_step_4", "company_id": company_id, "source": "email_pattern"})
-    except CrustdataError as exc:
-        errors.append({"step": "account.email_pattern", "error": str(exc)})
-        # Still try first.last@domain without the paid hint.
-        events.append(
-            {
-                "type": "fallback.contact_step_4",
-                "company_id": company_id,
-                "source": "email_pattern_guess_only",
-            }
-        )
+    if not crustdata_exhausted:
+        try:
+            client.web_search(
+                {"query": f'"@{domain}" email format', "sources": ["web"]},
+                campaign_id=campaign_id,
+                step="account.email_pattern",
+            )
+            events.append(
+                {
+                    "type": "fallback.contact_step_4",
+                    "company_id": company_id,
+                    "source": "email_pattern",
+                }
+            )
+        except OutOfCredits as exc:
+            events.append(
+                {
+                    "type": "fallback.crustdata_exhausted",
+                    "step": "account.email_pattern",
+                    "detail": str(exc)[:200],
+                }
+            )
+        except CrustdataError:
+            # Still try first.last@domain without the paid hint.
+            events.append(
+                {
+                    "type": "fallback.contact_step_4",
+                    "company_id": company_id,
+                    "source": "email_pattern_guess_only",
+                }
+            )
 
     email = f"{local}@{domain}"
     if not _mx_ok(domain):
