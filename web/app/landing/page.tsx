@@ -103,7 +103,7 @@ const STACK = [
     role: "Source of truth",
     metric: "neatlogs-agents",
     detail: "Open control plane, agents, and deploy path — reviewable end to end.",
-    icon: Github,
+    icon: Code2,
   },
   {
     name: "Gmail",
@@ -484,7 +484,7 @@ export default function LandingPage() {
               target="_blank"
               rel="noreferrer"
             >
-              <Github className="size-3.5" strokeWidth={1.75} aria-hidden />
+              <Code2 className="size-3.5" strokeWidth={1.75} aria-hidden />
               GitHub
             </a>
             <Link
