@@ -30,7 +30,16 @@ export function CalendarConnectSection() {
       toast.success("Google Calendar connected (test account)");
       void qc.invalidateQueries({ queryKey: queryKeys.calendarStatus });
     } else if (cal === "error") {
-      toast.error(`Calendar connect failed: ${params.get("reason") || "unknown"}`);
+      const reason = params.get("reason") || "unknown";
+      const hint =
+        reason === "state"
+          ? "OAuth state mismatch — restart the API, confirm GOOGLE_CALENDAR_REDIRECT_URI matches Google Cloud Console, then Connect again."
+          : reason === "token"
+            ? "Google token exchange failed — check client id/secret and redirect URI."
+            : reason === "secret_key"
+              ? "SIGNALSDR_SECRET_KEY missing — required to store calendar tokens."
+              : reason;
+      toast.error(`Calendar connect failed: ${hint}`);
     }
     const url = new URL(window.location.href);
     url.searchParams.delete("calendar");

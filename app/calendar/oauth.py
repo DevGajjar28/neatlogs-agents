@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
+import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,6 +23,37 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 ACCOUNT_ID = "primary"
 STATE_KEY = "calendar_oauth_state"
+STATE_MAX_AGE_SEC = 600
+
+
+def _state_secret() -> bytes:
+    s = get_settings()
+    raw = (s.signalsdr_secret_key or s.google_calendar_client_secret or "").strip()
+    if not raw:
+        raw = "dev-calendar-oauth-state"
+    return raw.encode("utf-8")
+
+
+def mint_oauth_state() -> str:
+    """HMAC-signed state (ts.nonce.sig) so callback works even if SQLite state is lost."""
+    ts = str(int(time.time()))
+    nonce = secrets.token_urlsafe(16)
+    payload = f"{ts}.{nonce}"
+    sig = hmac.new(_state_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def verify_oauth_state(state: str) -> bool:
+    if not state or state.count(".") != 2:
+        return False
+    ts_s, nonce, sig = state.split(".", 2)
+    if not ts_s.isdigit() or not nonce or not sig:
+        return False
+    if abs(int(time.time()) - int(ts_s)) > STATE_MAX_AGE_SEC:
+        return False
+    payload = f"{ts_s}.{nonce}"
+    expected = hmac.new(_state_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
 
 
 class CalendarNotConfigured(RuntimeError):
@@ -86,9 +120,10 @@ def start_auth_url(*, db_path: str | None = None) -> str:
     settings = get_settings()
     path = db_path or settings.db_path
     init_db(path)
-    state = secrets.token_urlsafe(24)
+    state = mint_oauth_state()
     conn = connect(path)
     try:
+        # Best-effort one-time hint; signed state is the source of truth on callback.
         set_setting(conn, STATE_KEY, {"state": state, "created_at": _now()})
         conn.commit()
     finally:
@@ -164,7 +199,11 @@ def complete_oauth(
     conn = connect(path)
     try:
         pending = get_setting(conn, STATE_KEY, {}) or {}
-        if not state or state != pending.get("state"):
+        pending_state = pending.get("state") if isinstance(pending, dict) else None
+        ok = bool(state) and (
+            verify_oauth_state(state) or (pending_state is not None and state == pending_state)
+        )
+        if not ok:
             raise ValueError("invalid_oauth_state")
         set_setting(conn, STATE_KEY, {})
         conn.commit()

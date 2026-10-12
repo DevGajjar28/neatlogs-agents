@@ -23,8 +23,12 @@ Hackathon AWS allows **EC2 / Lambda / IAM / LBs only**. Put **your own Bedrock k
 API_HOST=0.0.0.0
 CORS_ORIGINS=http://localhost:3000,https://YOUR_PROJECT.vercel.app
 UI_BASE_URL=https://YOUR_PROJECT.vercel.app
+# Must match Google Cloud → OAuth client → Authorized redirect URIs (and Vercel rewrite).
 GOOGLE_CALENDAR_REDIRECT_URI=https://YOUR_PROJECT.vercel.app/api/calendar/oauth/callback
 # + Bedrock (personal), CRUSTDATA_*, HUNTER_API_KEY, SIGNALSDR_SECRET_KEY, etc.
+# After changing redirect URI: restart systemd (`sudo systemctl restart signalsdr-api`)
+# and reconnect Calendar in Settings. Local vs cloud use different redirect URIs —
+# never mix localhost UI with a Vercel redirect_uri (causes ?calendar=error&reason=state|token).
 ```
 
 5. Bootstrap:

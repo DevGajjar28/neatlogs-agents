@@ -48,6 +48,34 @@ def test_start_auth_url_stores_state(env: Path):
     assert "prompt=consent" in url
 
 
+def test_signed_oauth_state_roundtrip(env: Path):
+    state = cal_oauth.mint_oauth_state()
+    assert cal_oauth.verify_oauth_state(state) is True
+    assert cal_oauth.verify_oauth_state("bad.state") is False
+    assert cal_oauth.verify_oauth_state("") is False
+
+
+def test_complete_oauth_accepts_signed_state_without_db_row(
+    env: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Callback must succeed even if SQLite pending state was lost (multi-process)."""
+    state = cal_oauth.mint_oauth_state()
+
+    def fake_exchange(code: str):
+        assert code == "auth-code"
+        return {
+            "access_token": "access-1",
+            "refresh_token": "refresh-1",
+            "expires_in": 3600,
+        }
+
+    monkeypatch.setattr(cal_oauth, "_exchange_code", fake_exchange)
+    monkeypatch.setattr(cal_oauth, "_fetch_email", lambda _t: "cal@example.com")
+    st = cal_oauth.complete_oauth(code="auth-code", state=state, db_path=str(env))
+    assert st["connected"] is True
+    assert st["email"] == "cal@example.com"
+
+
 def test_create_event_posts_to_google(env: Path, monkeypatch: pytest.MonkeyPatch):
     now = datetime.now(timezone.utc).isoformat()
     conn = connect(env)
