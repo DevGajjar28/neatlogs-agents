@@ -999,6 +999,13 @@ def _sequence_fields(
     }
 
 
+def _lead_email_confidence(raw: Any) -> str:
+    v = str(raw or "none").strip().lower()
+    if v in {"verified", "likely", "guessed", "provided", "none"}:
+        return v
+    return "none"
+
+
 @router.get("/campaigns/{campaign_id}/leads", response_model=list[LeadRow])
 def get_leads(campaign_id: str) -> list[LeadRow]:
     contacts = {c["id"]: c for c in state_reader.contacts(campaign_id) if isinstance(c, dict)}
@@ -1111,7 +1118,7 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
                 contact_title=contact.get("title"),
                 role_kind=contact.get("role_kind"),
                 email_masked=mask_email(contact["email"]) if contact.get("email") else None,
-                email_confidence=contact.get("email_confidence") or "none",  # type: ignore[arg-type]
+                email_confidence=_lead_email_confidence(contact.get("email_confidence")),  # type: ignore[arg-type]
                 fit=int(round(float(company.get("fit_score") or 0) * 100)),
                 verifier=vlabel,  # type: ignore[arg-type]
                 redraft_count=int(v.get("redraft_count") or 0),
@@ -1162,7 +1169,7 @@ def get_leads(campaign_id: str) -> list[LeadRow]:
                 contact_title=contact.get("title"),
                 role_kind=contact.get("role_kind"),
                 email_masked=mask_email(contact["email"]) if contact.get("email") else None,
-                email_confidence=contact.get("email_confidence") or "none",  # type: ignore[arg-type]
+                email_confidence=_lead_email_confidence(contact.get("email_confidence")),  # type: ignore[arg-type]
                 fit=int(round(float(company.get("fit_score") or 0) * 100)),
                 status="discovered",
                 contact_id=cid,
@@ -1650,7 +1657,7 @@ def get_lead(lead_or_contact_id: str) -> LeadDetail:
         contact_title=contact.get("title"),
         role_kind=contact.get("role_kind"),
         email_masked=mask_email(contact["email"]) if contact.get("email") else None,
-        email_confidence=contact.get("email_confidence") or "none",  # type: ignore[arg-type]
+        email_confidence=_lead_email_confidence(contact.get("email_confidence")),  # type: ignore[arg-type]
         fit=int(round(float(company.get("fit_score") or 0) * 100)),
         status=lead_row["status"] if lead_row else "discovered",
         updated_at=lead_row["updated_at"] if lead_row else None,

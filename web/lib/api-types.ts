@@ -626,7 +626,7 @@ export interface components {
              * @default none
              * @enum {string}
              */
-            email_confidence: "verified" | "likely" | "guessed" | "none";
+            email_confidence: "verified" | "likely" | "guessed" | "provided" | "none";
             /**
              * Fit
              * @default 0

@@ -188,7 +188,7 @@ class LeadRow(BaseModel):
     contact_title: str | None = None
     role_kind: str | None = None
     email_masked: str | None = None
-    email_confidence: Literal["verified", "likely", "guessed", "none"] = "none"
+    email_confidence: Literal["verified", "likely", "guessed", "provided", "none"] = "none"
     fit: int = 0
     verifier: Literal["passed", "redrafted", "downgraded", "dropped", "pending"] = "pending"
     redraft_count: int = 0
