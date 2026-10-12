@@ -31,8 +31,8 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
     return (
       <div
         className={cn(
-          "px-3 py-2 text-[11px] text-[var(--text-subtle)]",
-          collapsed && "px-2 text-center",
+          "px-2 py-2 text-[11px] text-[var(--text-subtle)]",
+          collapsed && "text-center",
         )}
       >
         …
@@ -70,7 +70,7 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
     status.max_send_mode === "gmail_live"
       ? "Gmail"
       : status.max_send_mode === "gmail_test"
-        ? "Test mail"
+        ? "Test"
         : status.max_send_mode === "gmail_drafts"
           ? "Drafts"
           : "Sandbox";
@@ -79,7 +79,7 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
     return (
       <Link
         href="/settings"
-        className="flex flex-col items-center gap-1 rounded-[6px] p-1 text-[10px] text-[var(--text-muted)] hover:bg-[var(--surface-muted)]"
+        className="flex flex-col items-center gap-1.5 rounded-[6px] p-1.5 text-[10px] text-[var(--text-muted)] hover:bg-[var(--surface-muted)]"
         title={`${live ? "Live" : "Replay"} · ${formatCredits(credits)} credits · ${modelLabel}`}
       >
         <span
@@ -101,7 +101,7 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
   return (
     <Link
       href="/settings"
-      className="block space-y-3 rounded-[8px] border border-[var(--border)] bg-[var(--surface)] p-3 hover:border-[var(--border-strong)]"
+      className="block rounded-[8px] border border-[var(--border)] bg-[var(--surface)] px-3 py-3 hover:border-[var(--border-strong)]"
       title="Open Settings for full workspace details"
     >
       <div className="flex flex-wrap gap-1.5">
@@ -115,14 +115,14 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
         ) : null}
       </div>
 
-      <div className="space-y-1.5">
+      <div className="mt-3">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-[11px] text-[var(--text-muted)]">Credits</span>
           <span className="text-[12px] font-medium tabular-nums text-[var(--text)]">
             {formatCredits(credits)}
           </span>
         </div>
-        <div className="h-1 overflow-hidden rounded-full bg-[var(--surface-muted)]">
+        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-muted)]">
           <div
             className="h-full rounded-full bg-[var(--accent)]"
             style={{ width: `${creditBarPct(status, credits)}%` }}
@@ -130,31 +130,13 @@ export function SystemStatus({ collapsed }: { collapsed: boolean }) {
         </div>
       </div>
 
-      <div className="space-y-1 text-[11px] leading-4 text-[var(--text-muted)]">
-        <div className="flex justify-between gap-2">
-          <span>Hunter</span>
-          <span className={hunterOn ? "text-[var(--status-success)]" : undefined}>
-            {hunterOn ? "On" : "Off"}
-          </span>
-        </div>
-        <div className="flex justify-between gap-2">
-          <span>Model</span>
-          <span className="truncate text-[var(--text)]">{modelLabel}</span>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <span>Tracing</span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className={cn(
-                "size-1.5 rounded-full",
-                tracingOn ? "bg-[var(--status-success)]" : "bg-[var(--text-subtle)]",
-              )}
-              aria-hidden
-            />
-            {tracingOn ? "On" : "Off"}
-          </span>
-        </div>
-      </div>
+      <p className="mt-3 truncate text-[11px] leading-4 text-[var(--text-muted)]">
+        {hunterOn ? "Hunter" : "No Hunter"}
+        <span className="mx-1.5 text-[var(--border-strong)]">·</span>
+        {modelLabel}
+        <span className="mx-1.5 text-[var(--border-strong)]">·</span>
+        Trace {tracingOn ? "on" : "off"}
+      </p>
     </Link>
   );
 }
