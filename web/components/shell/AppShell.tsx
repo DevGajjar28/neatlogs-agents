@@ -8,7 +8,7 @@ import { CommandMenu } from "@/components/shell/CommandMenu";
 import { ShellProvider } from "@/components/shell/shell-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-const BARE_PATHS = new Set(["/"]);
+const BARE_PATHS = new Set(["/landing"]);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

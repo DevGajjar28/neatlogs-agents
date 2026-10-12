@@ -76,7 +76,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
-            href="/"
+            href="/landing"
             className="inline-flex h-8 items-center rounded-[6px] border border-[var(--border)] px-3 text-[13px] font-medium text-[var(--text-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--text)]"
           >
             Landing
@@ -201,7 +201,7 @@ export default function DashboardPage() {
               5.31 credits · $0.010 LLM · measured neatlogs Option B
             </p>
             <Link
-              href="/"
+              href="/landing"
               className="mt-3 inline-block text-[12px] font-medium text-[var(--accent)] hover:underline"
             >
               See landing story →

@@ -91,15 +91,21 @@ export function Sidebar() {
       >
         {!collapsed ? (
           <div className="flex items-baseline gap-1.5">
-            <span className="text-[14px] font-semibold leading-5 text-[var(--text)]">
-              ReachPilot
-            </span>
-            <span className="text-[11px] font-medium text-[var(--text-subtle)]">beta</span>
+            <Link href="/landing" className="flex items-baseline gap-1.5 hover:opacity-80">
+              <span className="text-[14px] font-semibold leading-5 text-[var(--text)]">
+                ReachPilot
+              </span>
+              <span className="text-[11px] font-medium text-[var(--text-subtle)]">beta</span>
+            </Link>
           </div>
         ) : (
-          <span className="text-[12px] font-semibold text-[var(--text)]" title="ReachPilot">
+          <Link
+            href="/landing"
+            className="text-[12px] font-semibold text-[var(--text)]"
+            title="ReachPilot landing"
+          >
             R
-          </span>
+          </Link>
         )}
         <button
           type="button"
