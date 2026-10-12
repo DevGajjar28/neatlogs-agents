@@ -198,13 +198,13 @@ export default function DashboardPage() {
               </span>
             </p>
             <p className="mt-1 text-[12px] text-[var(--text-muted)]">
-              5.31 credits · $0.010 LLM · measured neatlogs Option B
+              5.31 credits · $0.010 LLM · $0.80/lead surplus ~$1.9k–2.1k/mo
             </p>
             <Link
               href="/landing"
               className="mt-3 inline-block text-[12px] font-medium text-[var(--accent)] hover:underline"
             >
-              See landing story →
+              Cost & profit on landing →
             </Link>
           </div>
         </section>
