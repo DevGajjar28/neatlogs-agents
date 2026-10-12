@@ -116,11 +116,12 @@ export function StreamLine({
   stream?: string | null;
   compact?: boolean;
 }) {
-  const { text, live, streaming } = useStreamText(status, detail, stream);
-  const label = live ? (streaming ? "● Streaming" : "● Live") : "Latest";
+  const { text, live } = useStreamText(status, detail, stream);
   return (
     <div className="ap-stream">
-      <div className={cn("ap-stream-label", live && "live")}>{label}</div>
+      {live ? (
+        <div className="ap-stream-label live">Working now</div>
+      ) : null}
       <p className={cn(compact ? "line-clamp-1" : "line-clamp-3")}>
         {text}
         {live ? <span className="ap-stream-caret" aria-hidden /> : null}
@@ -182,6 +183,7 @@ function SceneBox({
   );
 }
 
+/** Clear planner badge — same visual language as other agent icons (no cryptic orbit). */
 export function PlannerOrbit({
   agents,
   size = 56,
@@ -189,79 +191,25 @@ export function PlannerOrbit({
   agents: PipelineAgent[];
   size?: number;
 }) {
-  const running = agents.some((a) => a.status === "running");
-  const reduce = useReducedMotion();
-  const seeds = agents.filter((a) => a.key !== "planner").slice(0, 5);
-  const angles = [270, 342, 54, 126, 198];
+  const planner = agents.find((a) => a.key === "planner");
+  const active = planner?.status === "running" || agents.some((a) => a.status === "running");
+  const Icon = ICONS.planner;
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 72 72"
+    <span
+      className={cn(
+        "inline-flex items-center justify-center rounded-[8px] bg-[var(--ap-muted)]",
+        active && "ring-2 ring-[var(--ap-accent)]/30",
+      )}
+      style={{ width: size, height: size }}
+      title="Planner — routes work to the other agents"
       aria-hidden
-      className={running && !reduce ? "ap-anim" : undefined}
     >
-      <circle
-        cx="36"
-        cy="36"
-        r="28"
-        fill="none"
-        className="ap-stroke-border"
-        strokeWidth="1.5"
-        strokeDasharray="3 3"
+      <Icon
+        className="text-[var(--ap-accent)]"
+        style={{ width: Math.round(size * 0.4), height: Math.round(size * 0.4) }}
+        strokeWidth={1.75}
       />
-      <circle cx="36" cy="36" r="15" className="ap-fill-accent-soft ap-stroke-accent" strokeWidth="1.5" />
-      <g className={running && !reduce ? "ap-orbit" : undefined}>
-        {seeds.map((a, i) => {
-          const ang = ((angles[i] ?? 0) * Math.PI) / 180;
-          const r = a.status === "running" ? 5 : 3.5;
-          const cx = 36 + Math.cos(ang) * 28;
-          const cy = 36 + Math.sin(ang) * 28;
-          const fill =
-            a.status === "running"
-              ? "ap-fill-accent"
-              : a.status === "waiting"
-                ? "ap-fill-warning"
-                : a.status === "done"
-                  ? "ap-fill-success"
-                  : a.status === "failed"
-                    ? "ap-fill-danger"
-                    : "ap-fill-subtle";
-          return (
-            <g key={a.key}>
-              {a.status === "running" ? (
-                <line
-                  x1="36"
-                  y1="36"
-                  x2={cx}
-                  y2={cy}
-                  className="ap-stroke-accent ap-dash"
-                  strokeWidth="1"
-                  strokeDasharray="3 3"
-                />
-              ) : null}
-              <circle
-                cx={cx}
-                cy={cy}
-                r={r}
-                className={fill}
-                fillOpacity={a.status === "idle" ? 0.35 : 1}
-                stroke={a.status === "idle" ? "var(--ap-text-subtle)" : undefined}
-                strokeWidth={a.status === "idle" ? 1 : 0}
-              />
-            </g>
-          );
-        })}
-      </g>
-      <path
-        d="M28 40h16M32 34l8 6-8 6"
-        fill="none"
-        stroke="var(--ap-accent)"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    </span>
   );
 }
 

@@ -148,7 +148,7 @@ export function PipelineInspector({
         ) : null}
 
         <div>
-          <h4>Live</h4>
+          <h4>Status</h4>
           <StreamLine status={status} detail={agent.detail} stream={agent.stream} />
         </div>
 

@@ -55,30 +55,31 @@ def campaign_status(campaign_id: str) -> str:
                 """,
                 (campaign_id,),
             ).fetchone()
-            if run and not run["ended_at"]:
+            # Interrupt / pending email approve wins over "running" — otherwise the
+            # Approvals page (which filters waiting_approval) stays empty while the
+            # pipeline is blocked on human review.
+            payload = pending_interrupt(campaign_id)
+            if payload and payload.get("type") == "icp_approval":
+                status = "waiting_icp"
+            elif payload and payload.get("type") == "email_approval":
+                status = "waiting_approval"
+            elif _has_pending_email_approvals(campaign_id):
+                status = "waiting_approval"
+            elif run and not run["ended_at"]:
                 hb = datetime.fromisoformat(run["heartbeat_at"])
                 age = (datetime.now(timezone.utc) - hb).total_seconds()
                 if age > HEARTBEAT_STALE_S:
                     status = "crashed"
                 else:
                     status = "running"
+            elif stored == "waiting_approval":
+                status = "waiting_approval"
+            elif stored in {"completed", "halted", "failed", "queued", "waiting_icp"}:
+                status = stored
+            elif run and run["exit_code"] not in (None, 0):
+                status = "failed"
             else:
-                payload = pending_interrupt(campaign_id)
-                if payload and payload.get("type") == "icp_approval":
-                    status = "waiting_icp"
-                elif payload and payload.get("type") == "email_approval":
-                    status = "waiting_approval"
-                elif stored == "waiting_approval":
-                    status = "waiting_approval"
-                elif _has_pending_email_approvals(campaign_id):
-                    # Manual contact drafts after a finished run (no graph interrupt)
-                    status = "waiting_approval"
-                elif stored in {"completed", "halted", "failed", "queued", "waiting_icp"}:
-                    status = stored
-                elif run and run["exit_code"] not in (None, 0):
-                    status = "failed"
-                else:
-                    status = stored or "queued"
+                status = stored or "queued"
 
         if status != stored:
             conn.execute("UPDATE campaigns SET status = ? WHERE id = ?", (status, campaign_id))
