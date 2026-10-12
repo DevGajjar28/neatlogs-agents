@@ -926,3 +926,221 @@ def _customer_domains(profiles: list[dict]) -> list[str]:
         if domain:
             out.append(str(domain))
     return out
+
+
+def buyer_import_contacts_node(state: dict[str, Any]) -> dict[str, Any]:
+    """Import companies from a preloaded contact list (demo seed / provided_contacts)."""
+    import uuid
+
+    campaign_id = state["campaign_id"]
+    inp = state.get("input") or {}
+    provided_contacts = [
+        c for c in (inp.get("provided_contacts") or []) if isinstance(c, dict)
+    ]
+    events = EventBag(state, "buyer_finder")
+    errors = list(state.get("errors") or [])
+    extras = dict(state.get("extras") or {})
+    spent = float((state.get("budget") or {}).get("credits_spent") or 0)
+
+    # Distinct companies from contacts (prefer domain key).
+    company_rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for c in provided_contacts:
+        name = str(c.get("company") or "").strip() or "Unknown"
+        domain = str(c.get("domain") or "").strip().lower()
+        key = domain or name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        company_rows.append({"name": name, "domain": domain, "description": ""})
+
+    events.append(
+        {"type": "buyers.import_started", "n": len(company_rows), "contacts": len(provided_contacts)}
+    )
+    extras["target_mode"] = "provided_contacts"
+    extras["provided_contacts"] = provided_contacts
+    extras["seed"] = inp.get("seed") or extras.get("seed")
+
+    if not company_rows:
+        events.append(
+            {
+                "type": "buyers.import_done",
+                "matched": 0,
+                "n": 0,
+                "m": 0,
+                "message": "0 companies from your list are ready for research.",
+            }
+        )
+        return {
+            "companies": [],
+            "events": events,
+            "errors": errors,
+            "extras": extras,
+            "plan": set_plan_phase(state, "after_search"),
+            "budget": {"credits_spent": spent},
+        }
+
+    client = client_for_campaign(state)
+    matched: list[Company] = []
+    not_found: list[dict[str, Any]] = []
+    already_ids: set[str] = set()
+    domain_to_company_id: dict[str, str] = {}
+
+    try:
+        with_domain = [r for r in company_rows if r.get("domain")]
+        without_domain = [r for r in company_rows if not r.get("domain")]
+
+        batches: list[list[dict[str, str]]] = []
+        batch: list[dict[str, str]] = []
+        for row in with_domain:
+            batch.append(row)
+            if len(batch) >= 25:
+                batches.append(batch)
+                batch = []
+        if batch:
+            batches.append(batch)
+
+        for group in batches:
+            domains = [r["domain"] for r in group]
+            by_domain = {r["domain"]: r for r in group}
+            try:
+                payload = client.company_identify(
+                    {"domains": domains},
+                    campaign_id=campaign_id,
+                    step="buyers.import_identify",
+                )
+            except CrustdataError as exc:
+                errors.append({"step": "buyer_import_contacts", "error": str(exc)})
+                for r in group:
+                    # Soft-keep with synthetic id so account research can still run thin.
+                    cid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"seed:{r['domain']}"))
+                    company = Company(
+                        id=cid,
+                        name=r["name"],
+                        domain=r["domain"],
+                        industry=None,
+                        headcount=None,
+                        country=None,
+                        fit_score=1.0,
+                        fit_reasons=["preloaded_list", "identify_failed"],
+                        status="kept",
+                    )
+                    matched.append(company)
+                    domain_to_company_id[r["domain"]] = cid
+                    not_found.append(
+                        {"domain": r["domain"], "name": r["name"], "reason": str(exc)}
+                    )
+                continue
+
+            resolved = _identify_by_domain(payload)
+            for domain, row in by_domain.items():
+                hit = resolved.get(domain)
+                if hit and hit.get("id"):
+                    cid = str(hit["id"])
+                    if cid in already_ids:
+                        domain_to_company_id[domain] = cid
+                        continue
+                    already_ids.add(cid)
+                    company = Company(
+                        id=cid,
+                        name=str(hit.get("name") or row["name"]),
+                        domain=domain,
+                        industry=hit.get("industry"),
+                        headcount=hit.get("headcount"),
+                        country=hit.get("country"),
+                        fit_score=1.0,
+                        fit_reasons=["preloaded_list"],
+                        status="kept",
+                    )
+                    matched.append(company)
+                    domain_to_company_id[domain] = cid
+                    events.append(
+                        {
+                            "type": "buyers.import_matched",
+                            "company": company.name,
+                            "domain": domain,
+                        }
+                    )
+                else:
+                    cid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"seed:{domain}"))
+                    company = Company(
+                        id=cid,
+                        name=row["name"],
+                        domain=domain,
+                        industry=None,
+                        headcount=None,
+                        country=None,
+                        fit_score=1.0,
+                        fit_reasons=["preloaded_list", "not_in_crustdata"],
+                        status="kept",
+                    )
+                    matched.append(company)
+                    domain_to_company_id[domain] = cid
+                    not_found.append(
+                        {"domain": domain, "name": row["name"], "reason": "not_found"}
+                    )
+                    events.append(
+                        {
+                            "type": "buyers.import_not_found",
+                            "domain": domain,
+                            "company": row["name"],
+                        }
+                    )
+
+        for row in without_domain:
+            key = row["name"].lower()
+            cid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"seed:name:{key}"))
+            company = Company(
+                id=cid,
+                name=row["name"],
+                domain="",
+                industry=None,
+                headcount=None,
+                country=None,
+                fit_score=1.0,
+                fit_reasons=["preloaded_list", "domain_missing"],
+                status="kept",
+            )
+            matched.append(company)
+            domain_to_company_id[f"name:{key}"] = cid
+
+        spent = client.ledger.spent(campaign_id)
+    finally:
+        client.close()
+
+    # Map each contact → company_id for account researcher (skip people search).
+    contact_bindings: list[dict[str, Any]] = []
+    for c in provided_contacts:
+        domain = str(c.get("domain") or "").strip().lower()
+        company_name = str(c.get("company") or "").strip()
+        cid = None
+        if domain and domain in domain_to_company_id:
+            cid = domain_to_company_id[domain]
+        elif company_name:
+            cid = domain_to_company_id.get(f"name:{company_name.lower()}")
+        if not cid:
+            continue
+        contact_bindings.append({**c, "company_id": cid})
+
+    extras["import_not_found"] = not_found
+    extras["provided_contact_bindings"] = contact_bindings
+    extras["skip_people_search"] = True
+    m = len(matched)
+    events.append(
+        {
+            "type": "buyers.import_done",
+            "matched": m,
+            "n": len(company_rows),
+            "m": m,
+            "message": f"{m} companies from your list are ready for research.",
+        }
+    )
+
+    return {
+        "companies": [c.model_dump(mode="json") for c in matched],
+        "events": events,
+        "errors": errors,
+        "extras": extras,
+        "budget": {"credits_spent": spent},
+        "plan": set_plan_phase(state, "after_search"),
+    }

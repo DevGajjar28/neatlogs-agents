@@ -171,6 +171,9 @@ def run_campaign(campaign_id: str = typer.Argument(..., help="Campaign id create
         narrow_icp=meta["narrow_icp"],
         target_mode=meta.get("target_mode") or "discover",
         provided_companies=meta.get("provided_companies") or [],
+        provided_contacts=meta.get("provided_contacts") or [],
+        seed=meta.get("seed"),
+        seller_fallback=meta.get("seller_fallback") or {},
         template_id=meta.get("template_id"),
         template_name=meta.get("template_name"),
         template_snapshot=meta.get("template_snapshot"),
@@ -753,6 +756,42 @@ def parse_companies_cmd(
         typer.echo(
             f"{row.get('status')}\t{row.get('domain') or '-'}\t{row.get('name') or '-'}\t{row.get('reason') or ''}"
         )
+
+
+@app.command("seed-demo")
+def seed_demo_cmd(
+    name: str = typer.Argument("mindarmor", help="Seed name (mindarmor)"),
+    clear: bool = typer.Option(False, "--clear", help="Delete seeded rows for this seller"),
+) -> None:
+    """Load config/demo/{name}_contacts.csv into demo_seeds (gitignored files only)."""
+    from dotenv import load_dotenv
+
+    from app.config import clear_settings_cache
+    from app.infra import demo_seed
+
+    load_dotenv()
+    clear_settings_cache()
+    if name.strip().lower() != "mindarmor":
+        typer.echo(f"Unknown seed '{name}'. Only 'mindarmor' is supported.")
+        raise typer.Exit(code=1)
+    try:
+        summary = demo_seed.seed_mindarmor(clear=clear)
+    except FileNotFoundError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    if clear:
+        typer.echo(f"cleared={summary.get('cleared', 0)} domain={summary.get('seller_domain')}")
+        return
+    test_n = summary.get("test_inboxes")
+    if isinstance(test_n, list):
+        test_n = len(test_n)
+    typer.echo(
+        f"seeded domain={summary['seller_domain']} contacts={summary['contacts']} "
+        f"companies={summary['companies']} test_inboxes={test_n} "
+        f"skipped={summary['skipped']} domain_missing={summary['domain_missing']}"
+    )
+    for row in summary.get("skipped_rows") or []:
+        typer.echo(f"  skip row={row.get('row')} reason={row.get('reason')} email={row.get('email') or ''}")
 
 
 @app.command("fix-drafts")

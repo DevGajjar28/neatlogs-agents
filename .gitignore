@@ -15,6 +15,8 @@ __pycache__/
 cache/
 reports/raw/
 config/crustdata_account.json
+# Demo seed lists (real names/emails) — never commit
+config/demo/
 
 # Local build spec. Stays on disk. Never commit or push.
 /00_START_HERE.md

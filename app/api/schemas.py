@@ -108,7 +108,8 @@ class CampaignSummary(BaseModel):
     credits_spent: float = 0.0
     credit_cap: float = 400.0
     mode: Literal["replay", "live"] = "replay"
-    target_mode: Literal["discover", "provided"] = "discover"
+    target_mode: Literal["discover", "provided", "provided_contacts"] = "discover"
+    seed: str | None = None
     started_at: datetime | None = None
     trace_url: str | None = None
 
@@ -259,8 +260,9 @@ class CreateCampaignIn(BaseModel):
     mail_account_id: str | None = None
     send_mode: Literal["sandbox", "gmail_drafts", "gmail_test", "gmail_live"] = "sandbox"
     live_confirm_email: str | None = None
-    target_mode: Literal["discover", "provided"] = "discover"
+    target_mode: Literal["discover", "provided", "provided_contacts"] = "discover"
     provided_companies: list[ProvidedCompanyIn] = Field(default_factory=list)
+    seed: str | None = None
     template_id: str | None = None
 
 
@@ -334,7 +336,7 @@ class ParseCompaniesOut(BaseModel):
 class EstimateIn(BaseModel):
     n: int = Field(ge=1, le=50)
     mode: Literal["replay", "live"] = "live"
-    target_mode: Literal["discover", "provided"] = "discover"
+    target_mode: Literal["discover", "provided", "provided_contacts"] = "discover"
 
 
 class EstimateOut(BaseModel):

@@ -221,6 +221,9 @@ def execute_campaign(
     narrow_icp: bool = False,
     target_mode: str = "discover",
     provided_companies: list[dict[str, str]] | None = None,
+    provided_contacts: list[dict] | None = None,
+    seed: str | None = None,
+    seller_fallback: dict | None = None,
     template_id: str | None = None,
     template_name: str | None = None,
     template_snapshot: str | None = None,
@@ -250,6 +253,9 @@ def execute_campaign(
                 narrow_icp=narrow_icp,
                 target_mode=target_mode,
                 provided_companies=provided_companies,
+                provided_contacts=provided_contacts,
+                seed=seed,
+                seller_fallback=seller_fallback,
                 template_id=template_id,
                 template_name=template_name,
                 template_snapshot=template_snapshot,
@@ -313,6 +319,13 @@ def load_campaign_options(campaign_id: str) -> dict[str, Any]:
             "provided_companies": list(
                 opts.get("provided_companies") or inp.get("provided_companies") or []
             ),
+            "provided_contacts": list(
+                opts.get("provided_contacts") or inp.get("provided_contacts") or []
+            ),
+            "seed": opts.get("seed") or inp.get("seed"),
+            "seller_fallback": opts.get("seller_fallback")
+            or inp.get("seller_fallback")
+            or {},
             "template_id": opts.get("template_id") or inp.get("template_id"),
             "template_name": opts.get("template_name") or inp.get("template_name"),
             "template_snapshot": opts.get("template_snapshot")

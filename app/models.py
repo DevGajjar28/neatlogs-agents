@@ -70,7 +70,7 @@ class Contact(BaseModel):
     email_source: Literal[
         "crustdata", "crustdata_realtime", "hunter", "pattern_guess", "user", "none"
     ]
-    email_confidence: Literal["verified", "likely", "guessed", "none"]
+    email_confidence: Literal["verified", "likely", "guessed", "provided", "none"]
     profile_url: str | None
 
 

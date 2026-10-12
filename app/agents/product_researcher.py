@@ -41,6 +41,30 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
     evidence = []
     pages = web.fetch_seller_pages(website)
     page_blob = "\n\n".join(f"URL: {p['url']}\n{p['text'][:3000]}" for p in pages)[:14000]
+    extras = dict(state.get("extras") or {})
+    seller_fallback = (
+        extras.get("seller_fallback")
+        or (state.get("input") or {}).get("seller_fallback")
+        or {}
+    )
+    used_seed_fallback = False
+    if (not pages or len(page_blob.strip()) < 200) and isinstance(seller_fallback, dict) and seller_fallback:
+        used_seed_fallback = True
+        events.append(
+            {
+                "type": "product.seed_fallback",
+                "detail": "Seller site fetch thin; using demo seed seller profile",
+                "domain": domain,
+            }
+        )
+        page_blob = (
+            f"SEED SELLER PROFILE\n"
+            f"one_liner: {seller_fallback.get('one_liner') or ''}\n"
+            f"products: {seller_fallback.get('products') or []}\n"
+            f"value_props: {seller_fallback.get('value_props') or []}\n"
+            f"pricing: {seller_fallback.get('pricing_notes') or ''}\n"
+            f"named_customers: {seller_fallback.get('named_customers') or []}\n"
+        )[:8000]
 
     events.append(
         {
@@ -90,12 +114,23 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
         errors.append({"step": "product_researcher.llm", "error": str(exc)})
         if "llm_bad_json" in str(exc):
             events.append({"type": "recovery.llm_bad_json", "step": "product_researcher"})
-        extracted = _ExtractedSeller(
-            one_liner=description or f"{company_name} product",
-            products=[company_name],
-            value_props=[description] if description else [],
-            named_customers=heuristic_customers[:8],
-        )
+        if used_seed_fallback and isinstance(seller_fallback, dict):
+            extracted = _ExtractedSeller(
+                one_liner=str(seller_fallback.get("one_liner") or description or company_name),
+                products=[str(p) for p in (seller_fallback.get("products") or [company_name])],
+                value_props=[str(v) for v in (seller_fallback.get("value_props") or [])],
+                pricing_notes=seller_fallback.get("pricing_notes"),
+                named_customers=[
+                    str(c) for c in (seller_fallback.get("named_customers") or [])
+                ][:8],
+            )
+        else:
+            extracted = _ExtractedSeller(
+                one_liner=description or f"{company_name} product",
+                products=[company_name],
+                value_props=[description] if description else [],
+                named_customers=heuristic_customers[:8],
+            )
 
     named = []
     for name in extracted.named_customers:
@@ -129,9 +164,12 @@ def product_researcher_node(state: dict[str, Any]) -> dict[str, Any]:
         evidence=evidence,
     )
     spent = float((state.get("budget") or {}).get("credits_spent") or 0)
+    out_extras = dict(state.get("extras") or {})
+    if used_seed_fallback:
+        out_extras["seller_seed_fallback"] = True
     return {
         "seller": brief.model_dump(mode="json"),
-        "extras": dict(state.get("extras") or {}),
+        "extras": out_extras,
         "events": events,
         "errors": errors,
         "budget": {"credits_spent": spent},

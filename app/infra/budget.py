@@ -107,7 +107,7 @@ def estimate_campaign(
         return {"total": 0.0, "by_step": []}
     n = max(1, int(n))
     prices = load_account_prices()
-    provided = str(target_mode or "discover") == "provided"
+    provided = str(target_mode or "discover") in {"provided", "provided_contacts"}
     steps: list[tuple[str, str, dict[str, Any]]] = [
         ("product.identify", "/company/identify", {}),
         ("product.enrich", "/company/enrich", {"domains": ["example.com"]}),

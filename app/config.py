@@ -32,6 +32,8 @@ class Settings(BaseSettings):
 
     data_mode: Literal["replay", "live"] = "replay"
     demo_mode: bool = True
+    # Local demo recording only — never enable on the public deployment.
+    demo_seed: bool = False
     allow_live_sends: bool = False
     max_credits: int = 400
 

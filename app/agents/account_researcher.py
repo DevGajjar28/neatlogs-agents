@@ -171,6 +171,10 @@ def fanout_account_companies(state: dict[str, Any]) -> list[Send] | str:
     enrich_by_id = (state.get("extras") or {}).get("enrich_by_id") or {}
     live_enabled = bool((state.get("extras") or {}).get("live_people_enabled"))
     crustdata_exhausted = bool((state.get("extras") or {}).get("crustdata_exhausted"))
+    skip_people = bool(
+        (state.get("extras") or {}).get("skip_people_search")
+        or (state.get("input") or {}).get("target_mode") == "provided_contacts"
+    )
     campaign_mode = ((state.get("input") or {}).get("mode") or "replay")
 
     return [
@@ -183,6 +187,7 @@ def fanout_account_companies(state: dict[str, Any]) -> list[Send] | str:
                 "titles": titles,
                 "live_people_enabled": live_enabled,
                 "crustdata_exhausted": crustdata_exhausted,
+                "skip_people_search": skip_people,
                 "campaign_mode": campaign_mode,
             },
         )
@@ -198,6 +203,7 @@ def account_company_node(state: dict[str, Any]) -> dict[str, Any]:
     titles = list(state.get("titles") or [])
     live_enabled = bool(state.get("live_people_enabled"))
     crustdata_exhausted = bool(state.get("crustdata_exhausted"))
+    skip_people_search = bool(state.get("skip_people_search"))
     events: list[dict] = [
         {"type": "account.researching", "company": company.name, "company_id": company.id}
     ]
@@ -213,6 +219,7 @@ def account_company_node(state: dict[str, Any]) -> dict[str, Any]:
             campaign_id=campaign_id,
             live_people_enabled=live_enabled,
             crustdata_exhausted=crustdata_exhausted,
+            skip_people_search=skip_people_search,
             events=events,
             errors=errors,
         )
@@ -257,6 +264,12 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
     data_mode = campaign_data_mode(state)
     email_by_url: dict[str, tuple[str | None, str, str]] = {}
     crustdata_exhausted = bool((state.get("extras") or {}).get("crustdata_exhausted"))
+    extras_in = dict(state.get("extras") or {})
+    bindings = [
+        b
+        for b in (extras_in.get("provided_contact_bindings") or [])
+        if isinstance(b, dict) and b.get("company_id") and b.get("email")
+    ]
     for shard in shards:
         if any(
             (e.get("type") == "fallback.crustdata_exhausted")
@@ -264,6 +277,65 @@ def account_join_node(state: dict[str, Any]) -> dict[str, Any]:
             for e in (shard.get("events") or []) + (shard.get("errors") or [])
         ):
             crustdata_exhausted = True
+
+    # Preloaded contacts: attach from the seed list; never people-search / Hunter.
+    if bindings:
+        for b in bindings:
+            company_id = str(b["company_id"])
+            if company_id not in accounts and company_id not in {
+                str(s.get("company_id")) for s in shards
+            }:
+                continue
+            conf = "verified" if b.get("is_test_inbox") else "provided"
+            title = str(b.get("title") or "Leader") or "Leader"
+            contact = Contact(
+                id=f"{company_id}:{_slug(str(b.get('name') or 'unknown'))}",
+                company_id=company_id,
+                name=str(b.get("name") or "Unknown"),
+                title=title,
+                role_kind="champion",
+                email=str(b.get("email") or "").strip().lower() or None,
+                email_source="user",
+                email_confidence=conf,  # type: ignore[arg-type]
+                profile_url=None,
+            )
+            company_name = by_id.get(company_id).name if by_id.get(company_id) else company_id
+            events.append(
+                {
+                    "type": "account.contact_found",
+                    "role": title,
+                    "company": company_name,
+                    "confidence": conf,
+                    "company_id": company_id,
+                }
+            )
+            contacts.append(contact.model_dump(mode="json"))
+        contact_companies = {c["company_id"] for c in contacts}
+        for company in companies:
+            if company.status != "kept":
+                continue
+            if company.id not in contact_companies:
+                company.status = "dropped"
+                company.drop_reason = "no_contact"
+                events.append({"type": "account.no_contact", "company_id": company.id})
+        try:
+            spent = client.ledger.spent(campaign_id)
+        finally:
+            client.close()
+        extras = extras_in
+        extras["crustdata_exhausted"] = crustdata_exhausted
+        extras["skip_people_search"] = True
+        return {
+            "accounts": accounts,
+            "contacts": contacts,
+            "companies": [c.model_dump(mode="json") for c in companies],
+            "extras": extras,
+            "events": events,
+            "errors": errors,
+            "budget": {"credits_spent": spent},
+            "account_shards": Overwrite([]),
+            "plan": set_plan_phase(state, "after_account"),
+        }
 
     try:
         urls = [u for _, u, _ in pending_urls][:25]
@@ -631,6 +703,7 @@ def research_company(
     events: list[dict],
     errors: list[dict],
     crustdata_exhausted: bool = False,
+    skip_people_search: bool = False,
 ) -> dict[str, Any]:
     """Build account brief + find a person (name/url) via the fallback chain."""
     evidence = [
@@ -666,6 +739,15 @@ def research_company(
         why_now = [f"Active lookalike of seller ICP [{evidence[0].id}]"]
 
     story = _story(company, evidence, get_llm("fast"))
+    # Soft-mark thin research when enrich payload is empty / failed.
+    if not data or (isinstance(data, dict) and not data.get("basic_info") and not data.get("people")):
+        events.append(
+            {
+                "type": "account.research_thin",
+                "company_id": company.id,
+                "company": company.name,
+            }
+        )
     brief = AccountBrief(
         company_id=company.id,
         story=story,
@@ -673,17 +755,28 @@ def research_company(
         evidence=evidence,
     )
 
-    person = _find_person(
-        client,
-        company=company,
-        data=data,
-        titles=titles,
-        campaign_id=campaign_id,
-        live_people_enabled=live_people_enabled,
-        crustdata_exhausted=crustdata_exhausted,
-        events=events,
-        errors=errors,
-    )
+    # Demo seed / provided_contacts: contacts come from the list — never people search.
+    person = None
+    if not skip_people_search:
+        person = _find_person(
+            client,
+            company=company,
+            data=data,
+            titles=titles,
+            campaign_id=campaign_id,
+            live_people_enabled=live_people_enabled,
+            crustdata_exhausted=crustdata_exhausted,
+            events=events,
+            errors=errors,
+        )
+    else:
+        events.append(
+            {
+                "type": "fallback.person_search_skipped",
+                "company_id": company.id,
+                "detail": "preloaded contacts — people search skipped",
+            }
+        )
     return {
         "company_id": company.id,
         "account": brief.model_dump(mode="json"),

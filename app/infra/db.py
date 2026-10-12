@@ -255,6 +255,15 @@ CREATE TABLE IF NOT EXISTS calendar_accounts (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS demo_seeds (
+    id INTEGER PRIMARY KEY,
+    seller_domain TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_demo_seeds_domain ON demo_seeds(seller_domain);
 """
 
 TABLES = (
@@ -279,6 +288,7 @@ TABLES = (
     "reply_drafts",
     "meeting_proposals",
     "calendar_accounts",
+    "demo_seeds",
 )
 
 _CAMPAIGN_COLS = {

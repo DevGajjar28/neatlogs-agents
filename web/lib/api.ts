@@ -150,6 +150,7 @@ export type CampaignSummary = {
   id: string;
   seller_name: string;
   seller_domain: string;
+  seed?: string | null;
   status: string;
   current_stage?: string | null;
   stages?: {
@@ -162,7 +163,7 @@ export type CampaignSummary = {
   credits_spent: number;
   credit_cap: number;
   mode: "replay" | "live";
-  target_mode?: "discover" | "provided";
+  target_mode?: "discover" | "provided" | "provided_contacts";
   started_at?: string | null;
   trace_url?: string | null;
 };
@@ -217,8 +218,9 @@ export type CreateCampaignInput = {
   mail_account_id?: string | null;
   send_mode?: SendMode;
   live_confirm_email?: string | null;
-  target_mode?: "discover" | "provided";
+  target_mode?: "discover" | "provided" | "provided_contacts";
   provided_companies?: ProvidedCompany[];
+  seed?: string | null;
   template_id?: string | null;
 };
 

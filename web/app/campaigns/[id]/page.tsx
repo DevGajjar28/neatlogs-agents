@@ -137,8 +137,14 @@ export default function CampaignRunPage() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="truncate text-[16px] font-semibold">{q.data.seller_name}</h2>
-                {q.data.target_mode === "provided" ||
-                q.data.run_facts?.target_mode === "provided" ? (
+                {q.data.seed ||
+                q.data.target_mode === "provided_contacts" ||
+                q.data.run_facts?.target_mode === "provided_contacts" ? (
+                  <span className="rounded-[6px] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text)]">
+                    Preloaded list
+                  </span>
+                ) : q.data.target_mode === "provided" ||
+                  q.data.run_facts?.target_mode === "provided" ? (
                   <span className="rounded-[6px] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text)]">
                     Your list
                   </span>

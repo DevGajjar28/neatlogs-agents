@@ -240,7 +240,7 @@ def campaign_pipeline(campaign_id: str) -> PipelineOut:
         target_mode_raw = str(opts.get("target_mode") or inp.get("target_mode") or "discover")
         if opts.get("model_label"):
             model = str(opts["model_label"])
-    provided = target_mode_raw == "provided"
+    provided = target_mode_raw in {"provided", "provided_contacts"}
     target_mode: str = "list" if provided else "discover"
 
     enrich = _enrich_from_state(campaign_id, provided=provided, stage_rows=stage_rows)

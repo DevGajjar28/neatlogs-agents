@@ -23,6 +23,7 @@ from app.agents.account_researcher import (
 from app.agents.approval_gate import approval_gate_node
 from app.agents.autopilot_gate import autopilot_gate_node
 from app.agents.buyer_finder import (
+    buyer_import_contacts_node,
     buyer_import_node,
     buyer_propose_icp_node,
     buyer_search_node,
@@ -44,6 +45,7 @@ NODE_STAGE: dict[str, str] = {
     "buyer_propose_icp": "buyers",
     "buyer_search": "buyers",
     "buyer_import": "buyers",
+    "buyer_import_contacts": "buyers",
     "icp_gate": "icp",
     "account_enrich": "accounts",
     "account_company": "accounts",
@@ -66,8 +68,11 @@ def _product_node(state: dict[str, Any]) -> dict[str, Any]:
 
 def _count_label(name: str, state: dict[str, Any], result: dict[str, Any]) -> str | None:
     merged = {**state, **result}
-    if name == "buyer_import":
+    if name in {"buyer_import", "buyer_import_contacts"}:
         kept = [c for c in (merged.get("companies") or []) if c.get("status") == "kept"]
+        if name == "buyer_import_contacts":
+            contacts_n = len((merged.get("input") or {}).get("provided_contacts") or [])
+            return f"Your list · {len(kept)} companies · {contacts_n} contacts"
         provided_n = len((merged.get("input") or {}).get("provided_companies") or [])
         return f"Using your list · {len(kept)} of {provided_n} matched"
     if name in {"buyer_search", "buyer_propose_icp"}:
@@ -146,6 +151,10 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     graph.add_node("icp_gate", wrap_node("icp_gate", icp_gate_node))
     graph.add_node("buyer_search", wrap_node("buyer_search", buyer_search_node))
     graph.add_node("buyer_import", wrap_node("buyer_import", buyer_import_node))
+    graph.add_node(
+        "buyer_import_contacts",
+        wrap_node("buyer_import_contacts", buyer_import_contacts_node),
+    )
     graph.add_node("account_enrich", wrap_node("account_enrich", account_enrich_node))
     graph.add_node("account_company", wrap_node("account_company", account_company_node))
     graph.add_node("account_join", wrap_node("account_join", account_join_node))
@@ -165,6 +174,7 @@ def build_graph(checkpointer: SqliteSaver | None = None):
             "icp_gate": "icp_gate",
             "buyer_search": "buyer_search",
             "buyer_import": "buyer_import",
+            "buyer_import_contacts": "buyer_import_contacts",
             "account_researcher": "account_enrich",
             "email_writer": "email_writer",
             "done": END,
@@ -175,6 +185,7 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     graph.add_edge("icp_gate", "planner")
     graph.add_edge("buyer_search", "planner")
     graph.add_edge("buyer_import", "planner")
+    graph.add_edge("buyer_import_contacts", "planner")
     graph.add_conditional_edges("account_enrich", fanout_account_companies)
     graph.add_edge("account_company", "account_join")
     graph.add_edge("account_join", "planner")
@@ -222,14 +233,22 @@ def initial_state(
     narrow_icp: bool = False,
     target_mode: str = "discover",
     provided_companies: list[dict[str, str]] | None = None,
+    provided_contacts: list[dict[str, Any]] | None = None,
+    seed: str | None = None,
+    seller_fallback: dict[str, Any] | None = None,
     template_id: str | None = None,
     template_name: str | None = None,
     template_snapshot: str | None = None,
     autopilot: bool = True,
 ) -> dict[str, Any]:
     extras: dict[str, Any] = {}
-    if target_mode == "provided":
-        extras["target_mode"] = "provided"
+    if target_mode in {"provided", "provided_contacts"}:
+        extras["target_mode"] = target_mode
+    if seed:
+        extras["seed"] = seed
+        extras["skip_people_search"] = True
+    if seller_fallback:
+        extras["seller_fallback"] = seller_fallback
     if template_snapshot:
         extras["template_snapshot"] = template_snapshot
         extras["template_id"] = template_id
@@ -245,6 +264,8 @@ def initial_state(
             "narrow_icp": narrow_icp,
             "target_mode": target_mode,
             "provided_companies": list(provided_companies or []),
+            "provided_contacts": list(provided_contacts or []),
+            "seed": seed,
             "template_id": template_id,
             "template_name": template_name,
             "template_snapshot": template_snapshot,

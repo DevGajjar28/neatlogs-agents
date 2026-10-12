@@ -106,7 +106,7 @@ def _summary(row: Any) -> CampaignSummary:
     status = campaign_status(cid)
     traces = settings.neatlogs_traces_url or (run["trace_url"] if run else None)
     target_mode = str(opts.get("target_mode") or inp.get("target_mode") or "discover")
-    if target_mode not in {"discover", "provided"}:
+    if target_mode not in {"discover", "provided", "provided_contacts"}:
         target_mode = "discover"
     return CampaignSummary(
         id=cid,
@@ -121,6 +121,7 @@ def _summary(row: Any) -> CampaignSummary:
         credit_cap=float(opts.get("cap") or settings.max_credits),
         mode=opts.get("mode") or inp.get("mode") or settings.data_mode,  # type: ignore[arg-type]
         target_mode=target_mode,  # type: ignore[arg-type]
+        seed=opts.get("seed") or inp.get("seed"),
         started_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
         trace_url=traces,
     )
@@ -159,7 +160,33 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
 
     target_mode = body.target_mode or "discover"
     provided: list[dict[str, str]] = []
+    provided_contacts: list[dict] = []
+    seed: str | None = None
+    seller_fallback: dict = {}
+    seed_test_inboxes: list[str] = []
     n = int(body.n)
+    send_mode = body.send_mode or "sandbox"
+
+    # Demo seed (MindArmor): force provided_contacts + gmail_test when enabled.
+    from app.infra import demo_seed as demo_seed_mod
+    from app.infra.events import record_event
+
+    try:
+        seed_patch = demo_seed_mod.match_and_apply(
+            website=body.website, send_mode=send_mode
+        )
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    if seed_patch:
+        target_mode = str(seed_patch["target_mode"])
+        provided = list(seed_patch.get("provided_companies") or [])
+        provided_contacts = list(seed_patch.get("provided_contacts") or [])
+        seed = str(seed_patch.get("seed") or "mindarmor")
+        seller_fallback = dict(seed_patch.get("seller_fallback") or {})
+        seed_test_inboxes = list(seed_patch.get("seed_test_inboxes") or [])
+        n = int(seed_patch.get("n") or max(len(provided), 1))
+        send_mode = "gmail_test"
+
     if target_mode == "provided":
         try:
             provided = validate_provided_companies(
@@ -168,6 +195,10 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
         except ValueError as exc:
             raise HTTPException(422, detail=str(exc)) from exc
         n = len(provided)
+    elif target_mode == "provided_contacts":
+        if not provided_contacts:
+            raise HTTPException(422, detail="No preloaded contacts for this seller")
+        n = max(len(provided) or len({c.get("company") for c in provided_contacts}), 1)
     elif n < 5:
         raise HTTPException(422, detail="n must be between 5 and 50 for discover mode")
 
@@ -187,7 +218,6 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
         except ChaosConfigError as exc:
             raise HTTPException(422, detail=str(exc)) from exc
 
-    send_mode = body.send_mode or "sandbox"
     mail_account_id = body.mail_account_id
     account = None
     if send_mode != "sandbox":
@@ -200,6 +230,8 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
             raise HTTPException(422, detail="Send mode not allowed for this environment")
     live_confirm_ok = False
     if send_mode == "gmail_live":
+        if seed:
+            raise HTTPException(422, detail="Demo seed campaigns can't send live.")
         if not account:
             raise HTTPException(422, detail="Mail account required for live")
         confirm = (body.live_confirm_email or "").strip().lower()
@@ -209,6 +241,21 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
                 detail="live_confirm_email must match the mail account email",
             )
         live_confirm_ok = True
+
+    # Merge seed test inboxes into the mail account allowlist.
+    if seed and seed_test_inboxes and mail_account_id:
+        try:
+            existing = json.loads(account.get("test_recipients_json") or "[]") if account else []
+        except Exception:  # noqa: BLE001
+            existing = []
+        merged = []
+        seen = set()
+        for addr in list(existing) + seed_test_inboxes:
+            a = str(addr).strip().lower()
+            if a and "@" in a and a not in seen:
+                seen.add(a)
+                merged.append(a)
+        mail_accounts.update_account(mail_account_id, {"test_recipients": merged})
 
     cid = f"ui-{uuid.uuid4().hex[:10]}"
     try:
@@ -226,6 +273,10 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
         "live_confirm_ok": live_confirm_ok,
         "target_mode": target_mode,
         "provided_companies": provided,
+        "provided_contacts": provided_contacts,
+        "seed": seed,
+        "seller_fallback": seller_fallback,
+        "seed_test_inboxes": seed_test_inboxes,
         "template_id": tpl_snap["template_id"],
         "template_name": tpl_snap["template_name"],
         "template_snapshot": tpl_snap["template_snapshot"],
@@ -241,6 +292,15 @@ def create_campaign(body: CreateCampaignIn) -> CampaignSummary:
         options=options,
         status="queued",
     )
+    if seed_patch and seed_patch.get("demo_seed_event"):
+        ev = seed_patch["demo_seed_event"]
+        record_event(
+            cid,
+            str(ev.get("type") or "demo.seed_applied"),
+            "planner",
+            str(ev.get("message") or "Using a preloaded list for this demo."),
+            data={"n": ev.get("n"), "m": ev.get("m")},
+        )
     if live_confirm_ok:
         write_audit(
             actor="api",
