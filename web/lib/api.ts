@@ -4,6 +4,43 @@ export function apiBase(): string {
   return (process.env.NEXT_PUBLIC_API_BASE || DEFAULT_BASE).replace(/\/$/, "");
 }
 
+/** Build a fetchable URL. Supports absolute bases and same-origin `/api` (Vercel). */
+export function buildApiUrl(
+  path: string,
+  searchParams?: Record<string, string | number | boolean | undefined | null>,
+): string {
+  const base = apiBase();
+  const joined = path.startsWith("http")
+    ? path
+    : `${base}${path.startsWith("/") ? "" : "/"}${path}`;
+
+  let url: URL;
+  if (/^https?:\/\//i.test(joined)) {
+    url = new URL(joined);
+  } else {
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : "http://127.0.0.1:3000";
+    url = new URL(joined.startsWith("/") ? joined : `/${joined}`, origin);
+  }
+
+  if (searchParams) {
+    for (const [key, value] of Object.entries(searchParams)) {
+      if (value === undefined || value === null) continue;
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  // Prefer path-absolute for browser same-origin so Vercel rewrites apply.
+  if (typeof window !== "undefined" && url.origin === window.location.origin) {
+    return `${url.pathname}${url.search}`;
+  }
+  return url.toString();
+}
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -25,15 +62,7 @@ export async function api<T = unknown>(
   options: ApiOptions = {},
 ): Promise<T> {
   const { searchParams, headers, ...init } = options;
-  const url = new URL(
-    path.startsWith("http") ? path : `${apiBase()}${path.startsWith("/") ? "" : "/"}${path}`,
-  );
-  if (searchParams) {
-    for (const [key, value] of Object.entries(searchParams)) {
-      if (value === undefined || value === null) continue;
-      url.searchParams.set(key, String(value));
-    }
-  }
+  const url = buildApiUrl(path, searchParams);
 
   let res: Response;
   try {
